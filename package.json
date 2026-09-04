@@ -1,0 +1,16 @@
+{
+  "name": "treemaker-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "build:single": "vite build --config vite.config.singlefile.js && mv dist-single/index.html dist-single/treemaker-web-0.1.html",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "devDependencies": {
+    "vite": "^8.2.1",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}

@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TreeMaker SPA</title>
+    <meta
+      name="description"
+      content="Plantilla base para migrar TreeMaker (C++/wx) a una SPA en HTML, JavaScript y CSS."
+    />
+    <!-- Critical, inline, blocking: covers the page in the same paint as the
+         first frame, before the linked stylesheet below has a chance to
+         arrive — otherwise raw unstyled HTML flashes for a frame. The
+         .app-shell/#minWidthAlert/#busyOverlay stay hidden behind
+         html:not(.app-ready) until main.js's own final setup step adds
+         the app-ready class (see the bottom of src/main.js) — not until
+         the stylesheet's own 'load' event, which used to be wired via an
+         inline onload="" attribute on the <link> below. That attribute
+         worked under `vite dev` (which serves this file untouched) but
+         silently vanished from `vite build`'s output: production rewrites
+         the <link>'s href to the hashed asset path and regenerates the
+         element from scratch, dropping any custom attribute on it
+         (id included) in the process — app-ready never got set, and the
+         whole app stayed invisible behind display:none forever. Gating on
+         main.js's own completion instead doesn't depend on anything Vite
+         does to this tag. -->
+    <style>
+      html, body { background: #eef3f8; }
+      #pageLoader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #eef3f8;
+        color: #1d2736;
+        font-family: Inter, 'Segoe UI', sans-serif;
+        font-size: 1rem;
+      }
+      html.app-ready #pageLoader { display: none; }
+      html:not(.app-ready) .app-shell,
+      html:not(.app-ready) #minWidthAlert,
+      html:not(.app-ready) #busyOverlay {
+        display: none !important;
+      }
+    </style>
+    <link rel="stylesheet" href="/src/style.css">
+  </head>
+  <body>
+    <div id="pageLoader" data-i18n="app.loading">Cargando...</div>
+    <div id="minWidthAlert" class="min-width-alert" role="alert" data-i18n="app.minWidthWarning">This app requires a browser window at least 1300px wide. Widen your window or scroll horizontally.</div>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h1 data-i18n="app.title">TreeMaker Web</h1>
+          <hr />
+        </div>
+
+        <!-- File -->
+        <details class="panel collapsible">
+          <summary data-i18n="section.file">File</summary>
+          <input id="loadedFileNameInput" type="text" readonly tabindex="-1" autocomplete="off" style="display: none;" />
+          <div class="file-open-row">
+            <button id="loadTmd5Btn" data-i18n="controls.load">Load .tmd5</button>
+            <input id="loadTmd5Input" type="file" accept=".tmd5" hidden>
+            <button id="resetBtn" class="secondary" data-i18n="controls.revert" disabled>Revert</button>
+          </div>
+          <button id="saveTmd5Btn" class="file-save-row" data-i18n="controls.save">Save .tmd5</button>
+        </details>
+
+        <!-- Viewer Options -->
+        <details class="panel collapsible">
+          <summary data-i18n="section.view">View</summary>
+          <div class="view-presets" data-i18n-aria-label="view.modesAria" aria-label="View modes">
+            <button id="viewTree" class="view-preset" type="button" data-i18n="view.tree">Tree</button>
+            <button id="viewDesign" class="view-preset active" type="button" data-i18n="view.design">Design</button>
+            <button id="viewCreases" class="view-preset" type="button" disabled data-i18n="view.creasesMode">Creases</button>
+            <button id="viewPlan" class="view-preset" type="button" disabled data-i18n="view.plan">Plan</button>
+            <button id="viewBlueprint" class="view-preset" type="button" disabled data-i18n="view.blueprint">Blueprint</button>
+            <button id="viewFoldedForm" class="view-preset" type="button" disabled data-i18n="view.foldedForm">Folded Form</button>
+            <!-- Not a view-mode toggle like the rest of this grid (opens a
+                 modal instead — see #vertexListOverlay), just placed and
+                 sized like one; applyViewPreset()'s active-class sweep
+                 leaves it alone since its id never matches "view<Name>". -->
+            <button id="vertexListBtn" class="view-preset" type="button" disabled data-i18n="view.vertexList">Vertex List</button>
+          </div>
+          <label class="show-all-labels-row"><input id="showAllLabelsCheckbox" type="checkbox" autocomplete="off" /> <span data-i18n="view.showAllLabels">Show all labels</span></label>
+          <div class="paper-width-row">
+            <label for="paperSizeInches" data-i18n="prefs.paperSize">Paper width (in)</label>
+            <input id="paperSizeInches" type="text" inputmode="decimal" value="1.00" autocomplete="off" />
+          </div>
+          <div class="zoom-fit-row">
+            <button id="fitToWidthBtn" class="small" type="button" data-i18n="view.fitToWidth">Fit to Width</button>
+            <button id="fitToHeightBtn" class="small" type="button" data-i18n="view.fitToHeight">Fit to Height</button>
+          </div>
+        </details>
+
+        <!-- Action -->
+        <details class="panel collapsible">
+          <summary data-i18n="section.action">Action</summary>
+
+          <div class="action-group">
+            <button id="scaleEverythingBtn" class="small" data-i18n="solver.maximizeScale">Maximize Scale</button>
+          </div>
+
+          <div class="action-group">
+            <button id="scaleSelectionBtn" class="small" data-i18n="solver.scaleSelection">Scale Selection</button>
+          </div>
+
+          <div class="action-group">
+            <button id="minimizeStrainBtn" class="small" data-i18n="solver.minimizeStrain">Minimize Strain</button>
+          </div>
+
+          <!-- Result of the last Maximize Scale/Scale Selection/Minimize
+               Strain run (converged/not converged, iterations, residual,
+               cancelled...) — see renderSolverStatus() in main.js. Was
+               removed during a visual cleanup pass (see PENDIENTE.md) while
+               renderSolverStatus() kept writing to state.lastSolverResult
+               regardless; reinstated because that left every one of those
+               three actions' outcome completely invisible, including
+               failures (main.js's own catch blocks only logged to the
+               console). -->
+          <div id="solverStatus" class="solver-status" data-i18n="solver.statusUnsolved">Not solved yet</div>
+
+          <div class="action-group">
+            <button id="buildCpBtn" data-i18n="controls.buildCp">Build Crease Pattern</button>
+            <button id="killCpBtn" class="secondary" data-i18n="controls.killCp">Kill Crease Pattern</button>
+          </div>
+        </details>
+
+        <!-- Edit -->
+        <details class="panel collapsible">
+          <summary data-i18n="section.edit">Edit</summary>
+
+          <div class="undo-redo-row">
+            <button id="undoBtn" class="secondary" data-i18n="controls.undo">Undo</button>
+            <button id="redoBtn" class="secondary" data-i18n="controls.redo">Redo</button>
+          </div>
+
+          <div class="action-group">
+            <button id="editResetBtn" class="small" data-i18n="controls.reset">Reset</button>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.selectPartByIndex">Select Part by Index</strong>
+            <div class="part-type-row">
+              <label for="selectPartType" data-i18n="edit.partType">Part Type</label>
+              <select id="selectPartType" autocomplete="off">
+                <option value="none" data-i18n="partType.none" selected>None</option>
+                <option value="node" data-i18n="partType.node">Node</option>
+                <option value="edge" data-i18n="partType.edge">Edge</option>
+                <option value="path" data-i18n="partType.path">Path</option>
+                <option value="poly" data-i18n="partType.poly">Poly</option>
+                <option value="vertex" data-i18n="partType.vertex">Vertex</option>
+                <option value="crease" data-i18n="partType.crease">Crease</option>
+                <option value="facet" data-i18n="partType.facet">Facet</option>
+              </select>
+            </div>
+            <div id="selectPartIndexList" class="index-list"></div>
+            <label><input id="selectPartIndexMultipleCheckbox" type="checkbox" autocomplete="off" /> <span data-i18n="edit.multipleSelection">Multiple Selection</span></label>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.select">Select</strong>
+            <div class="node-buttons">
+              <button id="selectAllBtn" class="small" data-i18n="edit.selectAll">All</button>
+              <button id="selectNodesAndEdgesBtn" class="small" data-i18n="edit.selectNodesAndEdges">Nodes and Edges</button>
+              <button id="selectNoneBtn" class="small" data-i18n="edit.selectNone">None</button>
+              <button id="selectMovablePartsBtn" class="small" data-i18n="edit.selectMovableParts">Movable Parts</button>
+            </div>
+            <div class="node-buttons">
+              <button id="selectPathFromNodesBtn" class="small" data-i18n="edit.selectPathFromNodes">Path from Nodes</button>
+              <button id="selectCorridorFacetsBtn" class="small" data-i18n="edit.selectCorridorFacets">Corridor Facets</button>
+              <button id="facetJumpToPolyBtn" class="small" data-i18n="facet.viewPoly">Containing Polygon</button>
+            </div>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.nodes">Nodes</strong>
+            <div class="node-buttons">
+              <button id="editMakeRootBtn" class="small" data-i18n="node.setRoot">Make Root</button>
+              <button id="unpinAllBtn" class="small" disabled data-i18n="solver.unpinAll">Unpin All</button>
+              <button id="editPerturbSelectedBtn" class="small" data-i18n="edit.perturbSelected">Perturb Selected</button>
+              <button id="editPerturbAllBtn" class="small" data-i18n="edit.perturbAll">Perturb All</button>
+            </div>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.edges">Edges</strong>
+            <div class="node-buttons">
+              <button id="editSetLengthBtn" class="small" data-i18n="edit.setLength">Set Length</button>
+              <button id="editScaleLengthBtn" class="small" data-i18n="edit.scaleLength">Scale Length</button>
+            </div>
+            <div class="node-buttons">
+              <button id="editRenormalizeSelectionBtn" class="small" data-i18n="edit.renormalizeSelection">Renormalize to Selection</button>
+              <button id="editRenormalizeUnitScaleBtn" class="small" data-i18n="edit.renormalizeUnitScale">Renormalize to Unit Scale</button>
+            </div>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.absorb">Absorb</strong>
+            <div class="node-buttons">
+              <button id="editAbsorbSelectedNodeBtn" class="small" data-i18n="edit.absorbSelectedNode">Selected Node</button>
+              <button id="editAbsorbRedundantNodesBtn" class="small" data-i18n="edit.absorbRedundantNodes">Redundant Nodes</button>
+              <button id="editAbsorbSelectedEdgeBtn" class="small" data-i18n="edit.absorbSelectedEdge">Selected Edge</button>
+            </div>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.split">Split</strong>
+            <button id="editSplitBtn" class="small" data-i18n="edit.splitSelectedEdge">Split Selected Edge</button>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.strain">Strain</strong>
+            <div class="node-buttons">
+              <button id="editRemoveSelectionStrainBtn" class="small" data-i18n="edit.removeSelectionStrain">Remove Selection</button>
+              <button id="editRemoveAllStrainBtn" class="small" data-i18n="edit.removeAllStrain">Remove All</button>
+            </div>
+            <div class="node-buttons">
+              <button id="editRelieveSelectionStrainBtn" class="small" data-i18n="edit.relieveSelectionStrain">Relieve Selection</button>
+              <button id="editRelieveAllStrainBtn" class="small" data-i18n="edit.relieveAllStrain">Relieve All</button>
+            </div>
+          </div>
+
+          <div class="condition-editor">
+            <strong data-i18n="edit.stub">Stub</strong>
+            <div class="node-buttons">
+              <button id="editPickStubNodesBtn" class="small" data-i18n="edit.pickStubNodes">Pick for Nodes…</button>
+              <button id="editPickStubPolyBtn" class="small" data-i18n="edit.pickStubPoly">Pick for Poly…</button>
+            </div>
+            <select id="editStubChoices" style="display: none;"></select>
+            <button id="editAddPickedStubBtn" class="small" style="display: none;" data-i18n="edit.addPickedStub">Add Picked Stub</button>
+            <div class="node-buttons">
+              <button id="editAddLargestStubNodesBtn" class="small" data-i18n="edit.addLargestStubNodes">Add Largest to Nodes</button>
+              <button id="editAddLargestStubPolyBtn" class="small" data-i18n="edit.addLargestStubPoly">Add Largest to Poly</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- Preferences -->
+        <details class="panel collapsible">
+          <summary data-i18n="section.preferences">Preferences</summary>
+          <div class="prefs-grid">
+            <label for="languageSelect" data-i18n="tree.language">Language</label>
+            <select id="languageSelect">
+              <option value="en" data-i18n="lang.en">English</option>
+              <option value="es" data-i18n="lang.es">Español</option>
+            </select>
+
+            <label for="colorThemeSelect" data-i18n="prefs.colorTheme">Color theme</label>
+            <select id="colorThemeSelect">
+              <option value="gray" data-i18n="prefs.colorThemeGray">Gray-Black</option>
+              <option value="blue" data-i18n="prefs.colorThemeBlue">Sky Blue</option>
+              <option value="light" data-i18n="prefs.colorThemeLight">Light Gray</option>
+            </select>
+
+            <label for="optimizationAlgorithm" data-i18n="prefs.optimization">Optimization</label>
+            <select id="optimizationAlgorithm" disabled>
+              <option value="alm" data-i18n="prefs.optimizationAlm">ALM</option>
+            </select>
+          </div>
+
+          <label><input id="scaleAllowDifferentLayoutCheckbox" type="checkbox" /> <span data-i18n="solver.allowDifferentLayout">Allow a higher-scoring but very different layout</span></label>
+        </details>
+
+        <!-- Reference Finder (manual search, not tied to a tree selection) -->
+        <details class="panel collapsible" id="rfManualDetails">
+          <summary data-i18n="section.referenceFinder">Reference Finder</summary>
+          <p id="rfManualHint" class="hint hint-action" role="button" tabindex="0" data-i18n="rf.manualHint">To hide Reference Finder, click here or the × in the top-right corner of the right panel.</p>
+        </details>
+
+        <!-- Pinned to the sidebar's bottom edge (.sidebar-footer's
+             margin-top: auto) whenever the rest of the panel leaves room;
+             otherwise it's just the last item in the normal (scrollable)
+             flow, right after Reference Finder. -->
+        <div class="sidebar-footer">
+          <button id="aboutBtn" type="button" data-i18n="controls.about">About</button>
+        </div>
+
+      </aside>
+
+      <main class="workspace">
+        <div id="treemakerLayer" class="workspace-layer">
+          <canvas id="patternCanvas" width="900" height="700"></canvas>
+          <!-- Persistent bottom-left status row: Scale first, then the
+               currently pointed-at object — see .canvas-status-bar in
+               style.css. Scale is always visible (renderScaleLabel() in
+               main.js falls back to just the word "Scale" until a solve
+               has produced a value); the pointed-object cell only shows
+               while hovering something on the canvas. -->
+          <div class="canvas-status-bar">
+            <div id="scaleLabel" class="canvas-info-label canvas-info-label-fixed"></div>
+            <div id="hoverInfoLabel" class="canvas-info-label" style="display: none;"></div>
+          </div>
+          <div id="hScrollTrack" class="scroll-track horizontal" style="display: none;">
+            <div id="hScrollThumb" class="scroll-thumb"></div>
+          </div>
+          <div id="vScrollTrack" class="scroll-track vertical" style="display: none;">
+            <div id="vScrollThumb" class="scroll-thumb"></div>
+          </div>
+        </div>
+        <div id="referenceFinderLayer" class="workspace-layer" style="display: none;">
+          <div class="rf-diagram-strip" id="rfTargetRow">
+            <div class="rf-diagram-card" id="rfTargetCard">
+              <div class="rf-diagram-svg" id="rfTargetSvg"></div>
+            </div>
+            <div id="rfResultCards"></div>
+          </div>
+          <p id="rfDiagramPlaceholder" class="hint" data-i18n="rf.diagramsPlaceholder">Select a result and click "View diagrams" to see the fold sequence here.</p>
+          <div id="rfDiagramStrip" class="rf-diagram-strip" style="display: none;"></div>
+        </div>
+        <div id="foldedFormLayer" class="workspace-layer" style="display: none;">
+          <div id="foldedFormSvg" class="folded-form-svg"></div>
+        </div>
+      </main>
+
+      <aside class="inspector" id="propertiesPanel" style="display: none;">
+        <div id="propertiesPanelHeader">
+          <h3 id="propertiesPanelTitle" data-i18n="section.inspector">Inspector</h3>
+          <button id="propertiesPanelCloseBtn" type="button" style="display: none;" data-i18n-aria-label="rf.close" aria-label="Close">&times;</button>
+        </div>
+        <div id="projectProperties" class="field-grid">
+          <p id="treeName"><strong data-i18n="section.tree">Tree</strong></p>
+          <hr />
+          <h3 data-i18n="tree.paperGroup">Paper</h3>
+
+          <label for="paperWidth" data-i18n="tree.paperWidth">Width</label>
+          <input id="paperWidth" type="text" inputmode="decimal" value="1.0000" autocomplete="off" />
+
+          <label for="paperHeight" data-i18n="tree.paperHeight">Height</label>
+          <input id="paperHeight" type="text" inputmode="decimal" value="1.0000" autocomplete="off" />
+
+          <label for="scale" data-i18n="tree.scale">Scale</label>
+          <input id="scale" type="text" inputmode="decimal" value="0.1000" autocomplete="off" />
+
+          <hr />
+          <h3 data-i18n="tree.symmetry">Symmetry</h3>
+
+          <div id="symmetryType" class="symmetry-cards" role="group" data-i18n-aria-label="tree.symmetry" aria-label="Symmetry">
+            <button type="button" class="symmetry-card active" data-value="none">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#ffffff" stroke-width="1.5" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" />
+              </svg>
+              <span data-i18n="symmetry.none">None</span>
+            </button>
+            <button type="button" class="symmetry-card" data-value="book">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#ffffff" stroke-width="1.5" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" />
+                <line x1="12" y1="3" x2="12" y2="21" />
+              </svg>
+              <span data-i18n="symmetry.book">Book</span>
+            </button>
+            <button type="button" class="symmetry-card" data-value="diagonal">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#ffffff" stroke-width="1.5" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" />
+                <line x1="3" y1="21" x2="21" y2="3" />
+              </svg>
+              <span data-i18n="symmetry.diagonal">Diagonal</span>
+            </button>
+          </div>
+
+          <label for="symLocX" data-i18n="tree.symLocX">X</label>
+          <input id="symLocX" type="text" inputmode="decimal" value="0.5" autocomplete="off" />
+
+          <label for="symLocY" data-i18n="tree.symLocY">Y</label>
+          <input id="symLocY" type="text" inputmode="decimal" value="0.5" autocomplete="off" />
+
+          <label for="symAngle" data-i18n="tree.symAngle">Angle</label>
+          <input id="symAngle" type="text" inputmode="decimal" value="0.00" autocomplete="off" />
+        </div>
+        <div id="rfManualProperties" style="display: none;">
+          <div class="rf-mode-row">
+            <label><input id="rfManualModePoint" type="radio" name="rfManualMode" value="point" checked autocomplete="off" /> <span data-i18n="rf.mode.point">Point</span></label>
+            <label><input id="rfManualModeLine" type="radio" name="rfManualMode" value="line" autocomplete="off" /> <span data-i18n="rf.mode.line">Line</span></label>
+          </div>
+
+          <div class="rf-coord-row">
+            <label for="rfManualX1" data-i18n="rf.x1">X1</label>
+            <input id="rfManualX1" type="text" inputmode="decimal" value="0" autocomplete="off" />
+            <label for="rfManualY1" data-i18n="rf.y1">Y1</label>
+            <input id="rfManualY1" type="text" inputmode="decimal" value="0" autocomplete="off" />
+          </div>
+          <div class="rf-coord-row">
+            <label for="rfManualX2" data-i18n="rf.x2">X2</label>
+            <input id="rfManualX2" type="text" inputmode="decimal" value="0" autocomplete="off" disabled />
+            <label for="rfManualY2" data-i18n="rf.y2">Y2</label>
+            <input id="rfManualY2" type="text" inputmode="decimal" value="0" autocomplete="off" disabled />
+          </div>
+
+          <div class="rf-manual-buttons">
+            <button id="rfManualSearchBtn" class="small">
+              <span data-i18n="rf.findShort">Find</span>
+            </button>
+            <button id="rfManualSaveBtn" class="small" disabled>
+              <span data-i18n="rf.saveShort">Save</span>
+            </button>
+          </div>
+          <p id="rfManualNoResults" class="hint" style="display: none;" data-i18n="rf.noResults">No matching references found</p>
+        </div>
+        <div id="selectionProperties" class="field-grid" style="display: none;">
+          <p id="selectionName"><strong data-i18n="selection.title">Multiple Selection</strong></p>
+          <div id="selectionSummary" class="condition-row">0 elements selected</div>
+          <div id="selectionCounts"></div>
+
+          <hr />
+          <h3 data-i18n="conditions.section">Conditions</h3>
+          <div id="selectionComboEditor" class="condition-editor field-grid">
+            <label class="toggle-row">
+              <input id="selFixToSymmetryLine" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="node.fixToSymmetryLine">Fixed to Symmetry Line</span>
+            </label>
+            <label class="toggle-row">
+              <input id="selFixToPaperEdge" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="node.fixToPaperEdge">Fixed to Paper Edge (any)</span>
+            </label>
+            <label class="toggle-row">
+              <input id="selFixToPaperCorner" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="node.fixToPaperCorner">Fixed to Paper Corner (any)</span>
+            </label>
+            <label class="toggle-row">
+              <input id="selFixToPosition" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span id="selFixToPositionLabel">Fixed to Position</span>
+            </label>
+          </div>
+          <p id="selComboNotLeaf" class="hint" data-i18n="node.fixComboNotLeaf" style="display: none;">Only leaf nodes can carry this condition.</p>
+
+          <div id="selPairEditor" class="condition-editor" style="display: none;">
+            <label class="toggle-row">
+              <input id="selPairToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="selection.pairNodes">2 Nodes Paired about Symmetry Line</span>
+            </label>
+          </div>
+
+          <div id="selCollinearEditor" class="condition-editor" style="display: none;">
+            <label class="toggle-row">
+              <input id="selCollinearToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="selection.collinear">3 Nodes Collinear</span>
+            </label>
+          </div>
+
+          <div id="selNoStrainEditor" class="condition-editor" style="display: none;">
+            <label class="toggle-row">
+              <input id="selNoStrainToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="selection.noStrain">Edges No Strain</span>
+            </label>
+          </div>
+
+          <div id="selSameStrainEditor" class="condition-editor" style="display: none;">
+            <label class="toggle-row">
+              <input id="selSameStrainToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="selection.sameStrain">2 Edges Same Strain</span>
+            </label>
+          </div>
+
+          <hr id="rfCreaseChainDivider" style="display: none;" />
+          <h3 id="rfCreaseChainTitle" data-i18n="rf.panel.title" style="display: none;">Reference Finder</h3>
+          <p id="rfCreaseChainNotSameLine" class="hint" style="display: none;" data-i18n="rf.notSameLine">Select only creases that belong to the same straight line.</p>
+          <button id="rfCreaseChainSearchBtn" class="small" style="display: none;" data-i18n="rf.search">Find reference</button>
+        </div>
+        <div id="nodeProperties" class="field-grid" style="display: none;">
+          <p id="nodeName"><strong>Node: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="node.labelField">Label:</label>
+          <input id="nodeLabel" type="text" data-i18n-placeholder="node.labelPlaceholder" placeholder="Label" />
+
+          <label data-i18n="node.posX">Position X:</label>
+          <input id="nodeX" type="text" inputmode="decimal" />
+
+          <label data-i18n="node.posY">Position Y:</label>
+          <input id="nodeY" type="text" inputmode="decimal" />
+
+          <button id="nodeApplyPosition" class="small" data-i18n="node.applyPosition">Apply</button>
+
+          <hr />
+          <h3 data-i18n="inspector.editGroup">Edit</h3>
+
+          <div class="node-buttons">
+            <button id="nodeUnpin" class="small" disabled data-i18n="node.unpin">Unpin</button>
+            <button id="nodeMakeRootBtn" class="small" data-i18n="node.setRoot">Make Root</button>
+            <button id="nodeAbsorbBtn" class="small" data-i18n="edit.absorb">Absorb</button>
+            <button id="nodePerturbBtn" class="small" data-i18n="node.perturb">Perturb</button>
+          </div>
+          <button id="nodeDelete" class="small delete" data-i18n="common.delete">Delete</button>
+
+          <hr />
+          <h3 data-i18n="rf.panel.title">Reference Finder</h3>
+          <button id="rfNodeSearchBtn" class="small" data-i18n="rf.search">Find reference</button>
+
+          <hr />
+          <h3 data-i18n="conditions.section">Conditions</h3>
+
+          <div id="nodeComboEditor" class="condition-editor field-grid">
+            <label class="toggle-row">
+              <input id="nodeFixToSymmetryLine" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="node.fixToSymmetryLine">Fixed to Symmetry Line</span>
+            </label>
+            <label class="toggle-row">
+              <input id="nodeFixToPaperEdge" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="node.fixToPaperEdge">Fixed to Paper Edge (any)</span>
+            </label>
+            <label class="toggle-row">
+              <input id="nodeFixToPaperCorner" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="node.fixToPaperCorner">Fixed to Paper Corner (any)</span>
+            </label>
+            <label class="toggle-row">
+              <input id="nodeFixToPosition" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span id="nodeFixToPositionLabel">Fixed to Position</span>
+            </label>
+          </div>
+          <p id="nodeComboNotLeaf" class="hint" data-i18n="node.fixComboNotLeaf" style="display: none;">Only leaf nodes can carry this condition.</p>
+        </div>
+
+        <div id="pathProperties" class="field-grid" style="display: none;">
+          <p id="pathName"><strong>Path: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="path.nodes">Nodes:</label>
+          <input id="pathNodes" type="text" value="—" readonly />
+          <label data-i18n="path.minTreeLength">Minimum Tree Length:</label>
+          <input id="pathMinTreeLength" type="text" value="—" readonly />
+          <label data-i18n="path.actTreeLength">Actual Tree Length:</label>
+          <input id="pathActTreeLength" type="text" value="—" readonly />
+          <label data-i18n="path.angle">Path Angle:</label>
+          <input id="pathAngle" type="text" value="—" readonly />
+          <hr />
+          <h3 data-i18n="rf.panel.title">Reference Finder</h3>
+          <button id="rfPathSearchBtn" class="small" data-i18n="rf.search">Find reference</button>
+
+          <hr />
+          <h3 data-i18n="conditions.section">Conditions</h3>
+
+          <!-- Fix Angle / Quantize Angle: the value inputs (a specific
+               angle; a quant step + offset) are gone for now — toggling
+               these on applies a sensible default (the path's current
+               angle; step 4 / offset 0) instead. Bringing back a way to
+               type a custom value is tracked in PENDIENTE.md. -->
+          <div class="condition-editor">
+            <label class="toggle-row">
+              <input id="pathActiveToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="path.activatePath">Activate Path</span>
+            </label>
+          </div>
+
+          <div class="condition-editor">
+            <label class="toggle-row">
+              <input id="pathFixAngleToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span id="pathFixAngleLabel" data-i18n="path.fixAngle">Fix Angle</span>
+            </label>
+          </div>
+
+          <div class="condition-editor">
+            <label class="toggle-row">
+              <input id="pathQuantizeToggle" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span id="pathQuantizeLabel" data-i18n="path.quantizeAngle">Quantize Angle</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="vertexProperties" class="field-grid" style="display: none;">
+          <p id="vertexName"><strong>Vertex: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="node.posX">Position X:</label>
+          <input id="vertexX" type="text" value="0.0" readonly />
+          <label data-i18n="node.posY">Position Y:</label>
+          <input id="vertexY" type="text" value="0.0" readonly />
+
+          <hr />
+          <h3 data-i18n="rf.panel.title">Reference Finder</h3>
+          <button id="rfVertexSearchBtn" class="small" data-i18n="rf.search">Find reference</button>
+        </div>
+
+        <div id="creaseProperties" class="field-grid" style="display: none;">
+          <p id="creaseName"><strong>Crease: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="crease.vertex">Vertex:</label>
+          <input id="creaseVertices" type="text" value="—" readonly />
+          <label data-i18n="crease.length">Length:</label>
+          <input id="creaseLength" type="text" value="—" readonly />
+          <label data-i18n="crease.kind">Kind:</label>
+          <input id="creaseKindValue" type="text" value="—" readonly />
+          <label data-i18n="crease.fold">Fold:</label>
+          <input id="creaseFoldValue" type="text" value="—" readonly />
+          <label data-i18n="crease.angle">Crease Angle:</label>
+          <input id="creaseAngle" type="text" value="—" readonly />
+
+          <hr />
+          <h3 data-i18n="rf.panel.title">Reference Finder</h3>
+          <button id="rfCreaseSearchBtn" class="small" data-i18n="rf.search">Find reference</button>
+        </div>
+
+        <div id="facetProperties" class="field-grid" style="display: none;">
+          <p id="facetName"><strong>Facet: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="facet.vertices">Vertices:</label>
+          <input id="facetVertices" type="text" value="—" readonly />
+          <label data-i18n="facet.order">Order:</label>
+          <input id="facetOrder" type="text" value="0" readonly />
+          <label data-i18n="facet.color">Color:</label>
+          <span id="facetColor"><span id="facetColorSwatch" class="color-swatch"></span></span>
+          <label data-i18n="facet.area">Area:</label>
+          <input id="facetArea" type="text" value="0.0" readonly />
+          <label data-i18n="facet.centroid">Centroid:</label>
+          <input id="facetCentroid" type="text" value="—" readonly />
+          <label data-i18n="facet.creases">Creases:</label>
+          <input id="facetCreases" type="text" value="—" readonly />
+        </div>
+
+        <div id="polyProperties" class="field-grid" style="display: none;">
+          <p id="polyName"><strong>Polygon: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="poly.centroid">Centroid:</label>
+          <input id="polyCentroid" type="text" value="—" readonly />
+          <label data-i18n="poly.ringNodes">Ring Nodes:</label>
+          <input id="polyRingNodes" type="text" value="—" readonly />
+          <label data-i18n="poly.ringPaths">Ring Paths:</label>
+          <input id="polyRingPaths" type="text" value="—" readonly />
+          <label data-i18n="poly.area">Area:</label>
+          <input id="polyArea" type="text" value="0.0" readonly />
+        </div>
+
+        <div id="conditionListPanel" class="condition-list">
+          <!-- Live feasibility indicator (see refreshFeasibilityChip() in
+               main.js): recomputed once per committed edit (button click,
+               blur, drag release, condition toggle...) via
+               tree.recalculateFeasibility(), NOT on every animation frame —
+               so a node mid-drag being momentarily "infeasible" never
+               flashes a warning, only the state right after the gesture
+               settles does. Hidden while the tree is feasible; clicking it
+               while shown reopens the same detailed breakdown the file-load
+               check already used. -->
+          <button id="feasibilityChip" class="feasibility-chip" type="button" style="display: none;">
+            <span id="feasibilityChipText"></span>
+          </button>
+          <strong data-i18n="conditions.active">Active Conditions</strong>
+          <div id="conditionList"></div>
+        </div>
+
+        <div id="rfSavedQueriesPanel" class="condition-list" style="display: none;">
+          <strong data-i18n="rf.savedQueries">Saved Queries</strong>
+          <div id="rfSavedQueriesList"></div>
+        </div>
+
+        <div id="edgeProperties" class="field-grid" style="display: none;">
+          <p id="edgeName"><strong>Edge: N/A</strong></p>
+          <hr />
+          <h3 data-i18n="node.propertiesGroup">Properties</h3>
+
+          <label data-i18n="edge.nodes">Nodes:</label>
+          <input id="edgeNodes" type="text" value="—" readonly />
+
+          <label data-i18n="edge.length">Length:</label>
+          <input id="edgeLength" type="text" inputmode="decimal" data-i18n-placeholder="edge.lengthPlaceholder" placeholder="Length" />
+
+          <label data-i18n="edge.strain">Strain:</label>
+          <input id="edgeStrain" type="text" inputmode="decimal" />
+
+          <label data-i18n="edge.stiffness">Stiffness:</label>
+          <input id="edgeStiffness" type="text" inputmode="decimal" />
+
+          <button id="edgeApplyProperties" class="small" data-i18n="node.applyPosition">Apply</button>
+
+          <hr />
+          <h3 data-i18n="inspector.editGroup">Edit</h3>
+
+          <!-- All reuse their left-panel equivalents' real functionality
+               (Split via its own modal, openSplitEdgeDialog() in main.js). -->
+          <div class="node-buttons">
+            <button id="edgeScaleLengthBtn" class="small" data-i18n="edit.scaleLength">Scale Length</button>
+            <button id="edgeRenormalizeSelectionBtn" class="small" data-i18n="edit.renormalizeToThisEdge">Renormalize to This Edge</button>
+            <button id="edgeAbsorbBtn" class="small" data-i18n="edit.absorb">Absorb</button>
+            <button id="edgeSplitBtn" class="small" data-i18n="edit.split">Split</button>
+            <button id="edgeRemoveStrainBtn" class="small" data-i18n="edge.removeStrain">Remove Strain</button>
+            <button id="edgeRelieveStrainBtn" class="small" data-i18n="edge.relieveStrain">Relieve Strain</button>
+          </div>
+          <button id="edgeDelete" class="small delete" data-i18n="common.delete">Delete</button>
+
+          <hr />
+          <h3 data-i18n="rf.panel.title">Reference Finder</h3>
+          <button id="rfEdgeSearchBtn" class="small" data-i18n="rf.search">Find reference</button>
+
+          <hr />
+          <h3 data-i18n="conditions.section">Conditions</h3>
+
+          <div class="condition-editor">
+            <label class="toggle-row">
+              <input id="edgeNoStrain" type="checkbox" class="toggle-input" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="edge.noStrain">Edge(s) No Strain</span>
+            </label>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div id="busyOverlay" class="busy-overlay" style="display: none;">
+      <div class="busy-box">
+        <div class="busy-spinner" aria-hidden="true"></div>
+        <p id="busyMessage" data-i18n="overlay.computing">Maximizando escala…</p>
+        <button id="busyCancelBtn" type="button" data-i18n="overlay.cancel">Cancelar</button>
+      </div>
+    </div>
+
+    <!-- Reusable info/warning/error dialog (see showMessageDialog() in
+         main.js): every window.alert() this app used to show went through
+         the browser's native, unstyled popup — replaced by this so error
+         and warning text renders in the app's own look, with an optional
+         bullet list (#messageDialogList) for a message that needs to
+         itemize several things at once (e.g. which conditions/paths made a
+         loaded design infeasible). Severity ('error'/'warning') is toggled
+         as a class on .message-box/.message-title, see style.css. -->
+    <div id="messageDialogOverlay" class="busy-overlay" style="display: none;">
+      <div class="busy-box prompt-box message-box">
+        <p id="messageDialogTitle" class="prompt-title message-title"></p>
+        <p id="messageDialogText" class="prompt-info"></p>
+        <ul id="messageDialogList" class="message-list" style="display: none;"></ul>
+        <div class="prompt-buttons">
+          <button id="messageDialogOkBtn" type="button" class="primary" data-i18n="dialog.ok">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reusable one-or-more-value prompt (see promptForFields()/
+         promptForNumber() in main.js) — a button/toggle that needs one or
+         more parameters before it can act opens this instead of building
+         its own modal. #promptFields is filled in with one label+input
+         pair per field right before the modal is shown. -->
+    <div id="promptOverlay" class="busy-overlay" style="display: none;">
+      <div class="busy-box prompt-box">
+        <p id="promptTitle" class="prompt-title"></p>
+        <div id="promptFields"></div>
+        <div class="prompt-buttons">
+          <button id="promptCancelBtn" type="button" data-i18n="overlay.cancel">Cancelar</button>
+          <button id="promptOkBtn" type="button" class="primary" data-i18n="dialog.ok">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vertex List modal (View section's "Vertex List" button): real paper
+         width + sort order up top, a scrollable table of major vertices in
+         the middle, Export (plain-text download, see exportVertexList() in
+         main.js) and Close at the bottom. -->
+    <div id="vertexListOverlay" class="busy-overlay" style="display: none;">
+      <div class="busy-box prompt-box vertex-list-box">
+        <p class="prompt-title" data-i18n="vertexList.title">Vertex List</p>
+        <div class="vertex-list-top-row">
+          <label for="vertexListRealPaperWidth" data-i18n="vertexList.realPaperWidth">Real paper width</label>
+          <input id="vertexListRealPaperWidth" type="text" inputmode="decimal" value="25.00" autocomplete="off" class="prompt-input" />
+          <select id="vertexListSortOrder" class="prompt-input">
+            <option value="y" selected data-i18n="vertexList.sortBottomToTop">Bottom to Top</option>
+            <option value="x" data-i18n="vertexList.sortLeftToRight">Left to Right</option>
+          </select>
+          <button id="vertexListApplyBtn" type="button" data-i18n="vertexList.apply">Apply</button>
+        </div>
+        <div id="vertexListBody" class="vertex-list-body"></div>
+        <div class="prompt-buttons">
+          <button id="vertexListExportBtn" type="button" data-i18n="vertexList.export">Export</button>
+          <button id="vertexListCloseBtn" type="button" class="primary" data-i18n="dialog.close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- About modal (sidebar's own "About" button, pinned to its bottom
+         edge — see .sidebar-footer). -->
+    <div id="aboutOverlay" class="busy-overlay" style="display: none;">
+      <div class="busy-box prompt-box">
+        <p class="prompt-title" data-i18n="about.title">About</p>
+        <p class="prompt-info" data-i18n="about.text">TreeMaker SPA is a browser-based reimplementation of Robert J. Lang's TreeMaker, the origami design tool.</p>
+        <div class="prompt-buttons">
+          <button id="aboutCloseBtn" type="button" class="primary" data-i18n="dialog.close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

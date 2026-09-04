@@ -1,0 +1,1784 @@
+:root {
+  font-family: Inter, 'Segoe UI', sans-serif;
+  color: #1d2736;
+  background: #eef3f8;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light;
+}
+
+/* Color tokens for the sidebar, Inspector (#propertiesPanel) and modal
+   windows only — deliberately NOT the central workspace/canvas, which
+   keeps its own literal colors regardless of theme (see .workspace,
+   #patternCanvas, .canvas-status-bar, .scroll-track, the Reference Finder
+   diagram strip, etc. further down). Three themes share this exact set of
+   names: this default "grey-black" palette right here, "Sky Blue" under
+   :root[data-theme="blue"], and "Light Gray" under
+   :root[data-theme="light"] — swapping the theme (Preferences > Color
+   theme, persisted via colorThemeSelect in main.js) only ever changes
+   these values, never the rules that use them.
+   Semantic groups:
+   --surface-0..4: a five-step scale from the sidebar's own background to
+     the lightest button-hover surface, reused for both backgrounds AND
+     borders (this file already reused the exact same grays for both roles
+     throughout, before this token pass). The two dark themes run this
+     scale dark-to-light; the light theme runs it light-to-slightly-darker
+     instead — each theme block picks whichever direction actually reads
+     as a coherent surface hierarchy for its own background.
+   --text-1..5: a five-step text scale from the base panel text color to
+     the faintest section-header text — brightest-first in the dark
+     themes, darkest-first in the light theme, same idea either way: each
+     step down is a little less emphasis.
+   --text-tint: the one blue-tinted text color (.panel label) that doesn't
+     fit the neutral text scale.
+   --accent/--accent-light: the interactive highlight color (focus rings,
+     the "on" state of a toggle, the active symmetry-line card...).
+   --on-accent: the color for text/icons sitting directly on an
+     accent/success-colored surface (.mode-btn.active, ::selection...) —
+     always white, since those surfaces are vividly colored regardless of
+     theme; kept separate from --text-1 because --text-1 is the PANEL's
+     own base text color, which does flip dark/light with the theme, while
+     an accent chip stays legible with white text either way.
+   --success/--warning/--danger*: semantic status colors — intentionally
+     the SAME in every theme (red still means destructive, green still
+     means converged, regardless of the neutral palette's own hue).
+   --select-active-*: the "active index" highlight in the Select Part by
+     Index panel — already its own blue in the grey-black theme; kept
+     identical across all themes rather than doubling up on blue tokens.
+   --row-hover-overlay: a translucent row-hover wash — white in the two
+     dark themes, darkened instead for the light theme (a white wash would
+     be invisible over an already-light surface). */
+:root {
+  --surface-0: #111827;
+  --surface-1: #0f172a;
+  --surface-2: #1e293b;
+  --surface-2-hover: #26344a;
+  --surface-3: #334155;
+  --surface-4: #475569;
+
+  --text-1: #ffffff;
+  --text-2: #e2e8f0;
+  --text-3: #cbd5e1;
+  --text-4: #94a3b8;
+  --text-5: #64748b;
+  --text-tint: #dbeafe;
+
+  --accent: #4f46e5;
+  --accent-light: #6366f1;
+  --on-accent: #ffffff;
+
+  --success: #35b85a;
+  --success-2: #22c55e;
+  --success-2-text: #bbf7d0;
+  --warning: #d97706;
+  --warning-text: #fcd34d;
+  --danger: #dc2626;
+  --danger-text: #fecaca;
+  --danger-muted-bg: #7f1d1d;
+  --danger-muted-border: #991b1b;
+  --danger-muted-text: #fca5a5;
+
+  --select-active-bg: #2563eb;
+  --select-active-border: #3b82f6;
+  --select-active-text: #f8fafc;
+
+  --row-hover-overlay: rgba(255, 255, 255, 0.06);
+}
+
+/* "Sky Blue" alternative theme: same neutral scale, shifted from slate
+   gray to a deep navy-blue family, plus a brighter sky-blue accent (the
+   original indigo would sit too close to the now-blue surfaces to still
+   read as a distinct highlight). Semantic status colors and the
+   already-blue --select-active-* tokens are deliberately left out here —
+   they're identical to the grey-black theme (see the comment above). */
+:root[data-theme="blue"] {
+  --surface-0: #0a1e33;
+  --surface-1: #081a2b;
+  --surface-2: #123454;
+  --surface-2-hover: #1a4269;
+  --surface-3: #1e4b73;
+  --surface-4: #2c6491;
+
+  --text-2: #e0f2fe;
+  --text-3: #bae6fd;
+  --text-4: #7dd3fc;
+  --text-5: #63a9d6;
+  --text-tint: #e0f2fe;
+
+  --accent: #38bdf8;
+  --accent-light: #7dd3fc;
+}
+
+/* "Light Gray" alternative theme: light gray surfaces with dark gray text
+   — the inverse polarity of the other two (dark surfaces, light text)
+   rather than just another hue. The accent stays the same indigo as the
+   grey-black theme (still reads fine on a light background); only the
+   neutral surface/text scale and the row-hover wash change. --on-accent
+   is deliberately NOT overridden here — white text still contrasts fine
+   against the vividly-colored accent/success chips even on a light page. */
+:root[data-theme="light"] {
+  --surface-0: #e2e8f0;
+  --surface-1: #ffffff;
+  --surface-2: #eef2f7;
+  --surface-2-hover: #e2e8f0;
+  --surface-3: #dbe2ea;
+  --surface-4: #c3ccd9;
+
+  --text-1: #1e293b;
+  --text-2: #334155;
+  --text-3: #475569;
+  --text-4: #64748b;
+  --text-5: #94a3b8;
+  --text-tint: #1d4ed8;
+
+  --row-hover-overlay: rgba(15, 23, 42, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #eef3f8;
+}
+
+body {
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+/* Explicit selection colors for every text field in the app (dark panel/
+   inspector inputs and the light prompt-modal ones alike): browsers derive
+   the default ::selection highlight from `color-scheme` when none is set,
+   and Chromium's version of that default is a near-transparent light blue
+   — legible on this page's own light background, but barely visible against
+   the dark inputs' own background, unlike Firefox's more opaque default.
+   An explicit, solid background (the same accent already used for focus
+   borders app-wide) reads clearly against both. */
+input[type="text"]::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(800px, 1fr) 260px;
+  min-width: 1300px;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+/* Fixed, non-responsive layout: below 1300px the shell doesn't reflow, it
+   just overflows and the page scrolls horizontally (see body below) while
+   this banner warns that the window is narrower than the app needs. */
+.min-width-alert {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 28px;
+  line-height: 28px;
+  z-index: 2000;
+  background: #b91c1c;
+  color: #ffffff;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
+}
+
+@media (max-width: 1299px) {
+  body {
+    overflow-x: auto;
+  }
+
+  .min-width-alert {
+    display: block;
+  }
+
+  .app-shell {
+    margin-top: 28px;
+    height: calc(100vh - 28px);
+    min-height: calc(100vh - 28px);
+  }
+}
+
+/* Flex column (not just block) so .sidebar-footer's margin-top: auto can
+   push it to the bottom edge whenever the rest of the panel leaves room —
+   see .sidebar-footer below. */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-0);
+  color: var(--text-1);
+  padding: 1rem 0.8rem;
+  overflow-y: auto;
+  max-height: 100vh;
+  border-right: 3px solid var(--accent);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.2);
+}
+
+/* Pins "About" to the sidebar's bottom edge when there's free space below
+   the rest of the panel's content (the auto margin absorbs it); once the
+   panel's own content already overflows (scrolls), auto margins can't go
+   negative, so this just sits right after Reference Finder in the normal
+   flow instead, same as any other section. Border+padding (rather than
+   just a margin gap) guarantee a visible separator either way. */
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--surface-3);
+}
+
+.sidebar-footer button {
+  width: 100%;
+}
+
+.sidebar h1 {
+  margin: 0 0 0.15rem;
+  font-size: 1.35rem;
+}
+
+.sidebar h3 {
+  margin: 0.7rem 0 0.3rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  color: var(--text-5);
+}
+
+/* Keeps "TreeMaker Web" (plus its divider) visible at all times while the
+   rest of the sidebar scrolls underneath it — same sticky-header pattern
+   already used for the Inspector's own per-part sections
+   (#propertiesPanel > #nodeProperties etc.): position: sticky against the
+   sidebar's own scroll, background matching the sidebar's so nothing
+   shows through as content scrolls past. */
+.sidebar-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-0);
+  padding-bottom: 0.5rem;
+}
+
+.sidebar-header hr {
+  border: none;
+  border-top: 1px solid var(--surface-3);
+  margin: 0.5rem 0 0;
+}
+
+.panel {
+  margin-bottom: 0.75rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.collapsible { display: block; }
+.collapsible summary { display: flex; align-items: center; gap: 0.45rem; margin: 0.7rem 0 0.3rem; color: var(--text-3); cursor: pointer; font-size: 0.78rem; font-weight: 700; list-style: none; text-transform: uppercase; }
+.collapsible summary::-webkit-details-marker { display: none; }
+.collapsible summary::before { content: '▸'; color: var(--text-4); transition: transform 0.15s ease; }
+.collapsible[open] summary::before { transform: rotate(90deg); }
+
+/* ID selector so this wins over the generic .panel input[type="text"]
+   rule below (same color/background/border/padding, but a different
+   font-size and text color) regardless of source order. */
+#loadedFileNameInput {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  color: var(--text-4);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.file-open-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+
+.file-save-row {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+}
+
+.panel label {
+  font-size: 0.78rem;
+  color: var(--text-tint);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.panel label input[type="checkbox"] {
+  width: auto;
+  cursor: pointer;
+}
+
+.show-all-labels-row {
+  margin-top: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.paper-width-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--surface-3);
+}
+
+.paper-width-row label {
+  flex: none;
+}
+
+.part-type-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.part-type-row label {
+  flex: none;
+}
+
+.part-type-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Preferences: Language/Color theme/Optimization as label-left, select-right
+   rows sharing one grid, so every select lines up in the same column
+   instead of each stacking full-width under its own label. */
+.prefs-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+}
+
+.prefs-grid select {
+  min-width: 0;
+}
+
+.panel input[type="text"] {
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 4px;
+  color: var(--text-1);
+  font-size: 0.78rem;
+}
+
+/* Overrides the 100% width above — in this row the input shares space
+   with its label instead of spanning the whole panel. */
+.paper-width-row input[type="text"] {
+  width: 4.5rem;
+  flex: none;
+}
+
+.panel input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.buttons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+}
+
+.buttons button {
+  width: 100%;
+}
+
+.undo-redo-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+
+.undo-redo-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button {
+  border: none;
+  border-radius: 6px;
+  padding: 0.48rem 0.65rem;
+  cursor: pointer;
+  background: #4f46e5;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: opacity 0.15s ease;
+}
+
+button:hover {
+  opacity: 0.95;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+button.secondary {
+  background: #243244;
+}
+
+/* Every sidebar button shares Maximize Scale's palette and font size;
+   padding stays per-button. */
+.sidebar button {
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--surface-4);
+  font-size: 0.7rem;
+}
+
+.sidebar button:hover {
+  background: var(--surface-4);
+}
+
+/* Mode buttons */
+.mode-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+.mode-btn {
+  padding: 0.4rem 0.3rem;
+  font-size: 0.72rem;
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.mode-btn:hover {
+  background: var(--surface-4);
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent-light);
+}
+
+.view-presets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.3rem; margin-top: 0.3rem; }
+.view-preset { padding: 0.35rem 0.25rem; background: var(--surface-3); color: var(--text-3); font-size: 0.7rem; }
+.view-preset.active { background: var(--success); color: var(--on-accent); }
+.view-preset:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.zoom-fit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.3rem; }
+
+/* Solver panel */
+.solver-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.3rem; }
+.solver-status {
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  background: var(--surface-2);
+  color: var(--text-3);
+  border-left: 3px solid var(--surface-4);
+  word-break: break-word;
+}
+.solver-status.ok { border-left-color: var(--success-2); color: var(--success-2-text); }
+.solver-status.fail { border-left-color: var(--danger); color: var(--danger-text); }
+
+.color-swatch {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 3px;
+  border: 1px solid var(--surface-4);
+  vertical-align: middle;
+  margin-right: 0.3rem;
+}
+
+/* Properties panel: a real grid column (see .app-shell), not an overlay —
+   otherwise the canvas has no way to know this space is occupied and
+   "Fit Width/Height/View" size the paper as if they could draw under it. */
+#propertiesPanel {
+  height: 100vh;
+  max-height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  color: var(--text-1);
+  padding: 0.65rem;
+  border-left: 3px solid var(--accent);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.2);
+}
+
+#propertiesPanel h3 {
+  margin: 0.7rem 0 0.3rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  color: var(--text-5);
+}
+
+#propertiesPanel > #propertiesPanelHeader {
+  order: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+#propertiesPanelHeader h3 {
+  margin: 0.7rem 0 0.3rem;
+}
+
+#propertiesPanelCloseBtn {
+  background: none;
+  border: none;
+  color: var(--text-4);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+#propertiesPanelCloseBtn:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+  opacity: 1;
+}
+
+/* Kept reachable no matter how long the Active Conditions/Saved Queries
+   list below grows — these fields (and, for Reference Finder, the mode/
+   coordinate inputs and Find/Save) are what you actively work with, so
+   losing sight of them under a long list would be a real usability
+   regression, not just a cosmetic one. Sticks to the top of
+   #propertiesPanel's own scroll (the nearest scrolling ancestor) once
+   scrolled past; the background match + border-bottom keep it readable
+   over whatever scrolls under it. */
+#propertiesPanel > #nodeProperties,
+#propertiesPanel > #edgeProperties,
+#propertiesPanel > #pathProperties,
+#propertiesPanel > #vertexProperties,
+#propertiesPanel > #creaseProperties,
+#propertiesPanel > #facetProperties,
+#propertiesPanel > #polyProperties,
+#propertiesPanel > #projectProperties,
+#propertiesPanel > #selectionProperties,
+#propertiesPanel > #rfManualProperties {
+  order: 2;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--surface-3);
+}
+
+#propertiesPanel > #conditionListPanel,
+#propertiesPanel > #rfSavedQueriesPanel {
+  order: 3;
+  margin-top: auto;
+  padding-bottom: 0.5rem;
+}
+
+/* No gap: each .condition-row/.rf-saved-query-row already carries its own
+   border-bottom divider (see below), so a flex gap on top of that would
+   double-space rows. */
+#conditionList {
+  display: flex;
+  flex-direction: column;
+}
+
+/* No gap: each .rf-saved-query-row already carries its own border-bottom
+   divider (see below), so a flex gap on top of that would double-space
+   rows compared to #conditionList's plain gap-only rows. */
+#rfSavedQueriesList {
+  display: flex;
+  flex-direction: column;
+}
+
+#propertiesPanel label {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+#propertiesPanel span {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--text-3);
+  font-size: 0.76rem;
+}
+
+#propertiesPanel input[type="text"],
+#propertiesPanel input[type="number"] {
+  width: 100%;
+  margin-top: 0.15rem;
+  padding: 0.35rem 0.45rem;
+  background: var(--surface-1);
+  border: 1px solid var(--surface-3);
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 0.76rem;
+}
+
+#propertiesPanel input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
+/* A read-only field (computed/derived values like Path's tree lengths)
+   keeps the same box so columns still line up, just visibly non-editable:
+   no hover/focus highlight, dimmer text, default cursor. */
+#propertiesPanel input:read-only {
+  color: var(--text-4);
+  cursor: default;
+}
+
+#propertiesPanel input:read-only:focus {
+  border-color: var(--surface-3);
+  background: var(--surface-1);
+}
+
+#propertiesPanel select {
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  background: var(--surface-1);
+  border: 1px solid var(--surface-3);
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 0.76rem;
+}
+
+/* Reusable two-column field layout for inspectors: label on the left
+   (right-aligned, flush against the control), control on the right
+   (left-aligned), small gap between. Any child that isn't itself a label,
+   input or select (a section title, a hint, a row of buttons) spans both
+   columns automatically instead of needing its own markup for it. */
+#propertiesPanel .field-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.45rem 0.5rem;
+}
+
+#propertiesPanel .field-grid > label {
+  grid-column: 1;
+  margin-top: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+#propertiesPanel .field-grid > input,
+#propertiesPanel .field-grid > select,
+#propertiesPanel .field-grid > span {
+  grid-column: 2;
+  margin-top: 0;
+}
+
+#propertiesPanel .field-grid > :not(label):not(input):not(select):not(span) {
+  grid-column: 1 / -1;
+}
+
+/* A checkbox row (the checkbox plus its own label text, e.g. "Fix to
+   Symmetry Line") is a single self-contained unit, not one half of a
+   label/control pair — it spans the full row instead of being squeezed
+   into the narrow label column, with the checkbox kept immediately to the
+   left of its text. Doesn't apply to a checkbox whose label is immediately
+   followed by a value input (e.g. the "X" checkbox before its fix-value
+   field) — that one *is* one half of a pair and stays in the label column,
+   right-aligned like any other, checkbox still directly left of its text. */
+#propertiesPanel .field-grid > label:has(input[type="checkbox"]):not(:has(+ input)) {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-align: left;
+  white-space: normal;
+}
+
+/* A standalone action button (Apply, Unpin, Make Root...) spans the full
+   row like any other non-field content, but shouldn't stretch edge to
+   edge — a fixed, uniform width instead, centered in the row. */
+#propertiesPanel .field-grid > button {
+  width: 160px;
+  max-width: 160px;
+  justify-self: center;
+}
+
+/* Apply/Find reference (the non-destructive standalone buttons in this
+   panel) were still on the generic <button> rule's bright indigo — the
+   accent color meant for the light-themed prompt modal, out of place next
+   to this dark panel's own muted palette (.sidebar button and
+   .node-buttons/.edge-buttons already use it). Matches that same palette
+   exactly instead. button.delete is excluded — it keeps its own red below,
+   just muted to the same darkness tier. */
+#propertiesPanel .field-grid > button.small:not(.delete) {
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--surface-4);
+}
+
+#propertiesPanel .field-grid > button.small:not(.delete):hover {
+  background: var(--surface-4);
+}
+
+#propertiesPanel .field-grid > hr {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--surface-3);
+  margin: 0.2rem 0;
+}
+
+#propertiesPanel .field-grid > h3 {
+  margin: 0;
+}
+
+/* The selected part's own name/title line (e.g. "Node: 6", right under the
+   "INSPECTOR" header) — same reasoning as h3 above: drop the <p> element's
+   default browser margin so spacing above/below comes only from the
+   field-grid's own gap, not gap-plus-margin stacked on top of each other. */
+#treeName,
+#nodeName,
+#pathName,
+#vertexName,
+#creaseName,
+#facetName,
+#polyName,
+#edgeName,
+#selectionName {
+  margin: 0;
+}
+
+/* A "Conditions" section with no subtitle line of its own above its first
+   toggle (e.g. after removing "Fix Node") would otherwise butt the toggle
+   right up against the h3 — the field-grid row-gap alone reads as too
+   tight there specifically, unlike a plain label/input row. */
+#propertiesPanel .field-grid > h3 + .condition-editor {
+  margin-top: 0.3rem;
+}
+
+/* Symmetry Lines picker: three mutually-exclusive cards (icon + label)
+   instead of a <select>. Spans the full row via the field-grid rule above
+   (it's neither label, input nor select). */
+.symmetry-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+.symmetry-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem 0.3rem;
+  background: var(--surface-1);
+  border: 1px solid var(--surface-3);
+  border-radius: 6px;
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.symmetry-card:hover {
+  border-color: var(--surface-4);
+  background: var(--surface-2);
+}
+
+.symmetry-card.active {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.symmetry-card svg {
+  display: block;
+}
+
+.node-buttons,
+.edge-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem;
+  margin-top: 0.65rem;
+}
+
+/* Sidebar-only: line up with the rest of the panel's button-group
+   spacing — the inspector's own .node-buttons/.edge-buttons rows keep
+   their existing margin. */
+.sidebar .node-buttons {
+  margin-top: 0;
+}
+
+.node-buttons button.small,
+.edge-buttons button.small {
+  padding: 0.35rem 0.45rem;
+  font-size: 0.7rem;
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--surface-4);
+}
+
+.node-buttons button.small:hover,
+.edge-buttons button.small:hover {
+  background: var(--surface-4);
+}
+
+.condition-editor,
+.condition-list {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.65rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--surface-3);
+}
+
+/* Sidebar-only: line up this group's spacing with the rest of the panel's
+   button groups (e.g. .action-group) — the inspector's own condition
+   editors keep their own spacing rules untouched. */
+.sidebar .condition-editor {
+  margin-top: 0.65rem;
+}
+
+/* Sidebar-only: the Edit section's subsection subtitles ("Select Part by
+   Index", "Select", "Nodes", "Edges"...) match the same text style as the
+   "EDIT" summary above them (see .collapsible summary) instead of the
+   browser's default bold, and are centered across the panel like it. */
+.sidebar .condition-editor > strong {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: center;
+}
+
+/* .condition-editor's own divider line (border-top) is for contexts with
+   no section subtitle of its own — inside a field-grid "Conditions"
+   section, the section's <hr> already separates it from Edit above, and
+   the grid's own row gap is enough breathing room between one
+   condition-editor and the next, so no per-editor line is needed. */
+#propertiesPanel .field-grid > .condition-editor {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Same stacking/spacing as .condition-editor, without the divider line —
+   for a run of plain action buttons with no <strong> subtitle to divide. */
+.action-group {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+
+.condition-editor label,
+.action-group label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.condition-editor button.small,
+.action-group button.small {
+  padding: 0.35rem 0.45rem;
+  font-size: 0.7rem;
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--surface-4);
+}
+
+/* "Select Part by Index" panel: one button per 1-based index in the
+   chosen part type's list, wrapping instead of a fixed grid since the
+   count varies wildly by type (a handful of nodes vs. hundreds of
+   creases) — scrolls internally past a few rows so it can't push the
+   rest of the Edit panel out of view. */
+.index-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+
+.index-list button.small {
+  min-width: 1.9rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.7rem;
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--surface-4);
+}
+
+.index-list button.small:hover {
+  background: var(--surface-4);
+}
+
+.index-list button.small.active {
+  background: var(--select-active-bg);
+  color: var(--select-active-text);
+  border-color: var(--select-active-border);
+}
+
+.index-list-empty {
+  font-size: 0.7rem;
+  color: var(--text-4);
+}
+
+/* Toggle switch: a checkbox whose own state IS the applied/removed
+   condition — no separate Apply button. The native checkbox stays in the
+   DOM (still keyboard/screen-reader operable, still what 'change' fires
+   on) but is visually replaced by the track/thumb pair right after it. */
+/* #propertiesPanel label { display: block } outranks a plain .toggle-row
+   rule (ID beats class) when the toggle isn't a direct .field-grid child
+   (e.g. nested one level deeper inside a .condition-editor) — repeat the
+   #propertiesPanel prefix here so the switch and its label always end up
+   on one line instead of stacked. */
+#propertiesPanel .toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.toggle-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 18px;
+  background: var(--surface-3);
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-4);
+  border-radius: 50%;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.toggle-input:checked + .toggle-track {
+  background: var(--accent);
+}
+
+.toggle-input:checked + .toggle-track .toggle-thumb {
+  transform: translateX(14px);
+  background: var(--on-accent);
+}
+
+.toggle-input:focus-visible + .toggle-track {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--text-4);
+}
+
+.hint-action {
+  cursor: pointer;
+}
+
+.hint-action:hover {
+  color: var(--text-3);
+}
+
+.rf-mode-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.65rem;
+}
+
+.rf-mode-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0;
+}
+
+.rf-coord-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.45rem;
+}
+
+.rf-coord-row label {
+  display: flex;
+  align-items: center;
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+.rf-coord-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rf-manual-buttons {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+
+/* Same button family as the rest of this panel's standalone buttons
+   (#propertiesPanel .field-grid > button.small:not(.delete)) — these two
+   used to carry their own icon+bright-indigo look via .icon-label-btn;
+   now plain text buttons like everything else here. */
+.rf-manual-buttons button {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  background: var(--surface-3);
+  color: var(--text-3);
+  border: 1px solid var(--surface-4);
+}
+
+.rf-manual-buttons button:hover {
+  background: var(--surface-4);
+}
+
+/* Icon flush to the button's left edge, label flush to its right edge —
+   not the icon+label centered as one group. */
+.icon-label-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.icon-label-btn svg {
+  flex: 0 0 auto;
+}
+
+/* Thin divider between rows, same treatment as .rf-saved-query-row below
+   (and the same subtle-border tone used for every other divider in this
+   panel) — :last-child drops it so the list doesn't end on a stray line. */
+.condition-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  padding: 0.3rem 0.15rem;
+  color: var(--text-3);
+  font-size: 0.7rem;
+  border-bottom: 1px solid var(--surface-3);
+}
+
+.condition-row:last-child {
+  border-bottom: none;
+}
+
+/* Live feasibility indicator (#feasibilityChip, see refreshFeasibilityChip()
+   in main.js) — same dark-panel warning language as .solver-status.fail,
+   but clickable (a <button>, left-aligned, full width) since it reopens the
+   detailed breakdown on click. */
+.feasibility-chip {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  border-left: 3px solid var(--warning);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--warning-text);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.feasibility-chip:hover {
+  background: var(--surface-2-hover);
+}
+
+.condition-row button.small {
+  padding: 0.25rem 0.4rem;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* Two lines on the left (target coordinates, then rank/error) with the
+   delete button vertically centered against both via align-items: center
+   on the row itself — a thin border-bottom is the divider between rows
+   (see #rfSavedQueriesList's own zeroed gap), not a background/radius like
+   the plain single-line .condition-row rows. */
+.rf-saved-query-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.15rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--surface-3);
+}
+
+.rf-saved-query-row:last-child {
+  border-bottom: none;
+}
+
+.rf-saved-query-row > button {
+  flex: 0 0 auto;
+}
+
+.rf-saved-query-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rf-saved-query-target,
+.rf-saved-query-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rf-saved-query-target {
+  color: var(--text-2);
+  font-size: 0.72rem;
+}
+
+.rf-saved-query-meta {
+  color: var(--text-4);
+  font-size: 0.65rem;
+}
+
+/* Truncate instead of wrapping so a narrow panel keeps rows single-line —
+   without this the label wraps to several lines while the Delete button
+   still centers on the row, and with no gap between rows (see
+   #conditionList) that reads as the buttons sticking together. Applies to
+   every .condition-row (Active Conditions), not the Saved Queries rows
+   above (which style their own two-line .rf-saved-query-info instead). */
+.condition-row span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.condition-row button {
+  flex: 0 0 auto;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  line-height: 0;
+}
+
+.icon-btn svg {
+  display: block;
+}
+
+.rf-saved-query-row:hover {
+  background: var(--row-hover-overlay);
+}
+
+/* Same darkness/saturation tier as the surrounding button palette, just in
+   red instead of neutral — still reads as the destructive action, without
+   being the one jarringly bright button next to a muted panel. */
+button.delete {
+  background: var(--danger-muted-bg) !important;
+  border: 1px solid var(--danger-muted-border);
+  color: var(--danger-muted-text);
+  grid-column: 1 / -1;
+}
+
+button.delete:hover {
+  background: var(--danger-muted-border) !important;
+}
+
+.workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100vh;
+  padding: 0;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+/* One of these fills the workspace at a time (see main.js's
+   setWorkspaceLayer()): the TreeMaker canvas, the Reference Finder fold
+   diagrams, and the Folded Form view. */
+.workspace-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+/* Unlike the TreeMaker/Folded Form layers (one canvas, centered), this one
+   lays out rows of diagram cards starting from the top-left corner — the
+   always-present search-target row first, any fold-sequence diagrams below. */
+#referenceFinderLayer {
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+}
+
+/* Persistent bottom-left status row below the canvas: Scale (fixed width,
+   always visible — see renderScaleLabel() in main.js) then the currently
+   pointed-at object (auto width, only shown while hovering something on
+   the canvas), side by side — see the matching markup in index.html.
+   Anchored to #treemakerLayer itself rather than the canvas element, so
+   it stays put in the same corner of the pane regardless of the canvas's
+   own zoom/scroll position — the same anchor the old floating Scale pill
+   used. align-items: center keeps both cells vertically centered against
+   each other (moot in practice, since both share the same height, but
+   correct either way). */
+.canvas-status-bar {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+/* Same look the pointed-object label always had when it used to be drawn
+   directly onto the canvas (sharp corners, dark monospace text) — now
+   shared with Scale next to it instead of Scale's own previous rounded
+   pill style. Background matches the canvas's own "outside the paper"
+   fill (#dfdfdf — see CanvasRenderer.render()'s BACKGROUND_COLOR), not
+   the white paper drawn on top of it, so the label reads as part of the
+   canvas itself instead of a separate overlay. Deliberately outside the
+   theme-token system above: this sits over the central canvas, which
+   stays the same regardless of the sidebar/Inspector/modal color theme. */
+.canvas-info-label {
+  background: #dfdfdf;
+  color: #1f2937;
+  font: 12px/18px monospace;
+  padding: 5px 10px;
+}
+
+/* Scale is the one cell of this row whose width stays constant regardless
+   of its content's length, so it doesn't visibly resize every time a new
+   solve reports a different value (or falls back to just the word
+   "Scale" — see renderScaleLabel()). */
+.canvas-info-label-fixed {
+  width: 160px;
+  box-sizing: border-box;
+}
+
+/* Custom scrollbars for the canvas: after zooming in (wheel, "Fit to
+   Width/Height") the paper can end up bigger than the canvas, and the only
+   way back to the hidden part was the undiscoverable middle-button pan.
+   These map directly to renderer.panX/panY via getScrollExtents()/scrollTo(). */
+.scroll-track {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 999px;
+  z-index: 5;
+}
+
+.scroll-track.horizontal {
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  height: 10px;
+}
+
+.scroll-track.vertical {
+  top: 4px;
+  bottom: 4px;
+  right: 4px;
+  width: 10px;
+}
+
+.scroll-thumb {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.scroll-track.horizontal .scroll-thumb {
+  top: 0;
+  height: 100%;
+}
+
+.scroll-track.vertical .scroll-thumb {
+  left: 0;
+  width: 100%;
+}
+
+.scroll-thumb:hover,
+.scroll-thumb.dragging {
+  background: rgba(15, 23, 42, 0.55);
+}
+
+#patternCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+  cursor: default;
+}
+
+.folded-form-svg {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.folded-form-svg svg {
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+}
+
+.canvas-card {
+  border: 1px solid #d5deeb;
+  background: #f5f7fb;
+  border-radius: 16px;
+  box-shadow: 0 18px 30px rgba(15, 23, 42, 0.12);
+}
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Every modal in the app (busy spinner, prompt, message dialog, Vertex
+   List) shares this base box, composed with the classes below for its own
+   extra content — same theme tokens as the sidebar/Inspector (see :root
+   above), so a modal always matches whichever of the two color themes is
+   currently active. */
+.busy-box {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 6px;
+  padding: 0.65rem;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 260px;
+}
+
+.busy-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 4px solid var(--surface-3);
+  border-top-color: var(--accent);
+  animation: busy-spin 0.8s linear infinite;
+}
+
+.busy-box p {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* Same button family as the rest of the app (.sidebar button /
+   #propertiesPanel's standalone Apply/Find reference/Delete) — no more
+   bright indigo "primary" vs light-grey "secondary" distinction, matching
+   how neither side panel makes that distinction either. */
+.busy-box button {
+  border: 1px solid var(--surface-4);
+  background: var(--surface-3);
+  color: var(--text-3);
+  border-radius: 6px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.busy-box button:hover {
+  background: var(--surface-4);
+}
+
+.busy-box button.primary {
+  background: var(--surface-3);
+  border-color: var(--surface-4);
+  color: var(--text-3);
+}
+
+.busy-box button.primary:hover {
+  background: var(--surface-4);
+}
+
+.prompt-box {
+  align-items: stretch;
+  min-width: 280px;
+}
+
+/* Same look as the Inspector's own subtitles (#propertiesPanel h3 — "
+   Inspector", "Properties", "Edit"...): small, uppercase, muted — not a
+   bold, full-brightness heading. .message-title's severity classes
+   (.error/.warning below) override this color when the dialog needs to
+   read as a warning/error at a glance. */
+.prompt-title {
+  margin: 0;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--surface-3);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-5);
+  text-align: left;
+}
+
+.prompt-box label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-4);
+}
+
+#promptFields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.prompt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+/* Split Edge's info lines and radio-selected fields (see
+   openSplitEdgeDialog() in main.js) — a shape #promptFields' plain
+   label+input pairs don't cover, so that dialog builds these directly. */
+.prompt-info {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-3);
+}
+
+.prompt-radio-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.prompt-radio-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-3);
+  flex: 1 1 auto;
+}
+
+.prompt-radio-row .prompt-input {
+  width: 110px;
+  flex: 0 0 auto;
+}
+
+.prompt-radio-row input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.prompt-input {
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--surface-3);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.76rem;
+  background: var(--surface-1);
+  color: var(--text-2);
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.prompt-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--surface-3);
+}
+
+/* Message dialog (showMessageDialog() in main.js) — the in-app replacement
+   for window.alert(). Reuses .prompt-box's layout; only adds the severity
+   color (left border + title) and the optional bullet list. Severity
+   colors are intentionally NOT theme tokens — red/amber keep the same
+   meaning regardless of which neutral palette is active. */
+.message-box {
+  max-width: 420px;
+  border-left: 4px solid var(--text-5);
+}
+.message-box.error { border-left-color: var(--danger); }
+.message-box.warning { border-left-color: var(--warning); }
+/* Lighter tints than the border accents above — legible against this
+   panel's own dark background, same family as button.delete's text
+   (--danger-muted-text) and .feasibility-chip's warning text
+   (--warning-text). */
+.message-title.error { color: var(--danger-muted-text); }
+.message-title.warning { color: var(--warning-text); }
+.message-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--text-3);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* Vertex List modal (View section's "Vertex List" button) — wider and
+   taller than the plain prompt-box so the middle section has real room to
+   scroll once the vertex table is added. */
+.vertex-list-box {
+  width: 560px;
+  max-width: 90vw;
+  height: 70vh;
+  max-height: 640px;
+}
+
+.vertex-list-top-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.vertex-list-top-row label {
+  flex: none;
+}
+
+.vertex-list-top-row input {
+  width: 6rem;
+  flex: none;
+}
+
+.vertex-list-top-row select {
+  width: auto;
+  flex: none;
+  cursor: pointer;
+}
+
+.vertex-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--surface-3);
+  border-radius: 4px;
+  background: var(--surface-1);
+}
+
+.vertex-list-empty {
+  margin: 0;
+  padding: 0.65rem;
+  font-size: 0.85rem;
+  color: var(--text-4);
+  text-align: center;
+}
+
+.vertex-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.vertex-list-table th,
+.vertex-list-table td {
+  box-sizing: border-box;
+  padding: 0.25rem 0.5rem;
+  text-align: right;
+  border-bottom: 1px solid var(--surface-3);
+}
+
+/* Both header rows stick while the body scrolls — the group-label row
+   ("Design Scale" / "Real Size") pinned above the X/Y row, each at a
+   fixed height so the second row's `top` lines up under the first. */
+.vertex-list-table thead th {
+  position: sticky;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-weight: 700;
+  height: 1.6rem;
+}
+
+.vertex-list-table thead tr:first-child th {
+  top: 0;
+  text-align: center;
+}
+
+.vertex-list-table thead tr:last-child th {
+  top: 1.6rem;
+}
+
+/* Visually separates the two X/Y column pairs from each other. */
+.vertex-list-table th:nth-child(3),
+.vertex-list-table td:nth-child(3) {
+  border-left: 1px solid var(--surface-3);
+}
+
+@keyframes busy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rf-diagram-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.rf-diagram-card {
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The target + results row is sized to fit an ~800px-wide central panel:
+   tighter gap/padding than the (unconstrained, wrapping) fold-sequence
+   strip below it, and narrower cards — the target card specifically here
+   rather than through the shared .rf-diagram-card, which the "View
+   diagrams" strip also uses at its own, more generous size. Left padding
+   is bumped to match .rf-diagram-strip's own 20px so this row's diagrams
+   line up with the fold-sequence diagrams below instead of sitting 10px to
+   their left.
+   `align-items: center` (a flex row, whose default is stretch) keeps every
+   card at its own natural height instead of being stretched to the
+   tallest one — without it, a short card's empty space below its own
+   content was the "too much space at the bottom" this row used to have —
+   while also vertically centering the shorter result cards against the
+   taller target card, rather than flush-aligning their tops.
+   `flex-shrink: 0` plus `overflow: visible` (overriding .rf-diagram-strip's
+   own overflow-y: auto) keep this row from ever being squeezed into a
+   scrollable sliver of its own by its flex-column parent — the whole
+   #referenceFinderLayer already scrolls on its own when needed, so this
+   row never should. */
+#rfTargetRow {
+  gap: 8px;
+  padding: 10px 10px 10px 20px;
+  align-items: center;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+#rfTargetRow .rf-diagram-card {
+  width: 190px;
+  box-sizing: border-box;
+  gap: 4px;
+}
+
+.rf-diagram-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.rf-diagram-caption {
+  margin: 0;
+  font-size: 0.82em;
+  color: #1d2736;
+  text-align: left;
+}
+
+/* Lets #rfResultCards sit as a plain wrapper for clearing/appending in JS
+   while its children still flow as direct flex items of #rfTargetRow. */
+#rfResultCards {
+  display: contents;
+}
+
+.rf-result-card {
+  width: 105px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 4px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.rf-result-card:hover {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.rf-result-card.selected {
+  border-color: #4f46e5;
+  background: rgba(79, 70, 229, 0.08);
+}
+
+.rf-result-card .rf-diagram-caption {
+  text-align: center;
+  font-size: 0.72em;
+}
