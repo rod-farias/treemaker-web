@@ -11,10 +11,11 @@
    windows only — deliberately NOT the central workspace/canvas, which
    keeps its own literal colors regardless of theme (see .workspace,
    #patternCanvas, .canvas-status-bar, .scroll-track, the Reference Finder
-   diagram strip, etc. further down). Three themes share this exact set of
-   names: this default "grey-black" palette right here, "Sky Blue" under
-   :root[data-theme="blue"], and "Light Gray" under
-   :root[data-theme="light"] — swapping the theme (Preferences > Color
+   diagram strip, etc. further down). Four themes share this exact set of
+   names: this default "Dark" palette right here, "Sky Blue" under
+   :root[data-theme="blue"], "Light" under
+   :root[data-theme="light"], and "Forest Green" under
+   :root[data-theme="green"] — swapping the theme (Preferences > Color
    theme, persisted via colorThemeSelect in main.js) only ever changes
    these values, never the rules that use them.
    Semantic groups:
@@ -43,7 +44,7 @@
      the SAME in every theme (red still means destructive, green still
      means converged, regardless of the neutral palette's own hue).
    --select-active-*: the "active index" highlight in the Select Part by
-     Index panel — already its own blue in the grey-black theme; kept
+     Index panel — already its own blue in the Dark theme; kept
      identical across all themes rather than doubling up on blue tokens.
    --row-hover-overlay: a translucent row-hover wash — white in the two
      dark themes, darkened instead for the light theme (a white wash would
@@ -90,7 +91,7 @@
    original indigo would sit too close to the now-blue surfaces to still
    read as a distinct highlight). Semantic status colors and the
    already-blue --select-active-* tokens are deliberately left out here —
-   they're identical to the grey-black theme (see the comment above). */
+   they're identical to the Dark theme (see the comment above). */
 :root[data-theme="blue"] {
   --surface-0: #0a1e33;
   --surface-1: #081a2b;
@@ -109,10 +110,10 @@
   --accent-light: #7dd3fc;
 }
 
-/* "Light Gray" alternative theme: light gray surfaces with dark gray text
+/* "Light" alternative theme: light gray surfaces with dark gray text
    — the inverse polarity of the other two (dark surfaces, light text)
    rather than just another hue. The accent stays the same indigo as the
-   grey-black theme (still reads fine on a light background); only the
+   Dark theme (still reads fine on a light background); only the
    neutral surface/text scale and the row-hover wash change. --on-accent
    is deliberately NOT overridden here — white text still contrasts fine
    against the vividly-colored accent/success chips even on a light page. */
@@ -131,7 +132,43 @@
   --text-5: #94a3b8;
   --text-tint: #1d4ed8;
 
+  /* --success-2-text/--danger-text are pale pastel greens/reds meant to
+     pop against the dark themes' dark surfaces (see .solver-status.ok/
+     .fail) — unreadable against this theme's near-white surfaces, so
+     unlike the rest of the semantic status colors (deliberately identical
+     across themes), these two get darker, light-background-appropriate
+     shades here. */
+  --success-2-text: #15803d;
+  --danger-text: #b91c1c;
+
   --row-hover-overlay: rgba(15, 23, 42, 0.06);
+}
+
+/* "Forest Green" alternative theme: dark green surfaces with white text,
+   same dark-to-light polarity as the Dark/Sky Blue themes, but with
+   a red accent instead of indigo/sky-blue for a stronger highlight against
+   the green. --on-accent is left at the default white — it still contrasts
+   fine against the red accent/success chips. */
+:root[data-theme="green"] {
+  --surface-0: #0d1f0a;
+  --surface-1: #0a1a08;
+  --surface-2: #1a3315;
+  --surface-2-hover: #234620;
+  --surface-3: #2f5929;
+  --surface-4: #3f7536;
+
+  --text-2: #e8f5e0;
+  --text-3: #c8e6bc;
+  --text-4: #9ccb8a;
+  --text-5: #6ba058;
+  --text-tint: #d1fae5;
+
+  --accent: #ef4444;
+  --accent-light: #f87171;
+
+  --select-active-bg: #b91c1c;
+  --select-active-border: #ef4444;
+  --select-active-text: #fff1f2;
 }
 
 * {
@@ -175,42 +212,13 @@ input[type="text"]::selection {
 }
 
 /* Fixed, non-responsive layout: below 1300px the shell doesn't reflow, it
-   just overflows and the page scrolls horizontally (see body below) while
-   this banner warns that the window is narrower than the app needs. */
-.min-width-alert {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 28px;
-  line-height: 28px;
-  z-index: 2000;
-  background: #b91c1c;
-  color: #ffffff;
-  text-align: center;
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0 1rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.35);
-}
-
+   just overflows and the page scrolls horizontally. The corresponding
+   warning is no longer a persistent on-page banner — it's one of the
+   About modal's startup warnings instead (see renderStartupWarnings() in
+   main.js), shown once at load rather than pinned on screen forever. */
 @media (max-width: 1299px) {
   body {
     overflow-x: auto;
-  }
-
-  .min-width-alert {
-    display: block;
-  }
-
-  .app-shell {
-    margin-top: 28px;
-    height: calc(100vh - 28px);
-    min-height: calc(100vh - 28px);
   }
 }
 
@@ -248,6 +256,14 @@ input[type="text"]::selection {
 .sidebar h1 {
   margin: 0 0 0.15rem;
   font-size: 1.35rem;
+}
+
+.app-version {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-5);
+  vertical-align: middle;
 }
 
 .sidebar h3 {
@@ -330,6 +346,13 @@ input[type="text"]::selection {
   cursor: pointer;
 }
 
+.prefs-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
 .show-all-labels-row {
   margin-top: 0.6rem;
   margin-bottom: 0.6rem;
@@ -371,7 +394,7 @@ input[type="text"]::selection {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 0.4rem 0.5rem;
+  gap: 0.9rem 0.5rem;
 }
 
 .prefs-grid select {
@@ -579,7 +602,17 @@ button.secondary {
    regression, not just a cosmetic one. Sticks to the top of
    #propertiesPanel's own scroll (the nearest scrolling ancestor) once
    scrolled past; the background match + border-bottom keep it readable
-   over whatever scrolls under it. */
+   over whatever scrolls under it.
+   max-height/overflow-y cap how tall this sticky block can get: without
+   it, on a short browser window this block's own content (particularly
+   the Conditions toggles) can end up taller than the whole panel, and
+   since it's sticky (always painted at the panel's scrolled top, opaque,
+   above the list in z-index), it would then visually cover the ENTIRE
+   Active Conditions/Saved Queries list below no matter how far the panel
+   is scrolled — scrolling the panel can't help because this block simply
+   never moves. Capping its height and letting IT scroll internally past
+   that cap guarantees at least 30% of the panel's height stays free for
+   the list underneath. */
 #propertiesPanel > #nodeProperties,
 #propertiesPanel > #edgeProperties,
 #propertiesPanel > #pathProperties,
@@ -594,6 +627,8 @@ button.secondary {
   position: sticky;
   top: 0;
   z-index: 1;
+  max-height: 70vh;
+  overflow-y: auto;
   background: var(--surface-2);
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--surface-3);
@@ -612,6 +647,8 @@ button.secondary {
 #conditionList {
   display: flex;
   flex-direction: column;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 /* No gap: each .rf-saved-query-row already carries its own border-bottom
@@ -1028,13 +1065,14 @@ button.secondary {
 }
 
 .rf-mode-row {
-  display: flex;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   margin-top: 0.65rem;
 }
 
 .rf-mode-row label {
   display: flex;
+  justify-content: center;
   align-items: center;
   gap: 0.25rem;
   margin-top: 0;
@@ -1466,6 +1504,81 @@ button.delete:hover {
 .prompt-box {
   align-items: stretch;
   min-width: 280px;
+}
+
+.about-box {
+  align-items: center;
+  width: 450px;
+}
+
+.about-heading {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-1);
+  text-align: center;
+}
+
+.about-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: 10px;
+  border: 1px solid var(--surface-3);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+}
+
+.prompt-info a,
+.about-link {
+  color: var(--accent-light);
+}
+
+#aboutText {
+  text-align: center;
+}
+
+.about-link {
+  margin: -0.4rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.about-link:hover {
+  text-decoration: underline;
+}
+
+.about-version {
+  margin: -0.3rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-5);
+  text-align: center;
+}
+
+/* Startup warnings (renderStartupWarnings() in main.js) — window too
+   narrow/short — listed here instead of a persistent on-page banner.
+   Same amber "warning" meaning as .feasibility-chip/.message-box.warning
+   elsewhere, just as a plain list rather than a clickable chip or its own
+   dialog. Hidden (via the [hidden] attribute) when there's nothing to
+   warn about, which is also what openAboutModal() checks to decide
+   whether to auto-close instead of waiting for Close. */
+.about-warnings {
+  width: 100%;
+  margin: 0;
+  padding: 0.5rem 0.6rem 0.5rem 1.4rem;
+  border-left: 3px solid var(--warning);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--warning-text);
+  font-size: 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  box-sizing: border-box;
+}
+
+.about-warnings[hidden] {
+  display: none;
 }
 
 /* Same look as the Inspector's own subtitles (#propertiesPanel h3 — "

@@ -1,12 +1,12 @@
 {
   "name": "treemaker-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
-    "build:single": "vite build --config vite.config.singlefile.js && mv dist-single/index.html dist-single/treemaker-web-0.1.html",
+    "build": "vite build && node scripts/strip-html-comments.js dist/index.html",
+    "build:single": "vite build --config vite.config.singlefile.js && node scripts/strip-html-comments.js dist-single/index.html && node -e \"const fs=require('fs'),v=require('./package.json').version;fs.renameSync('dist-single/index.html','dist-single/treemaker-web-'+v+'.html')\"",
     "preview": "vite preview --host 0.0.0.0"
   },
   "devDependencies": {

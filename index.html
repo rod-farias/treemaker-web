@@ -4,26 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TreeMaker SPA</title>
+    <!-- English always, regardless of the app's active UI language (SEO/
+         social-preview metadata isn't part of the translated app itself) —
+         same sentence as about.text in translations.json, plain text (no
+         markup, unlike that key's own HTML-embedded link). Keep both in
+         sync by hand if that description ever changes. -->
     <meta
       name="description"
-      content="Plantilla base para migrar TreeMaker (C++/wx) a una SPA en HTML, JavaScript y CSS."
+      content="TreeMaker Web is a browser-based reimplementation of Robert J. Lang's TreeMaker, the origami design tool."
     />
     <!-- Critical, inline, blocking: covers the page in the same paint as the
          first frame, before the linked stylesheet below has a chance to
          arrive — otherwise raw unstyled HTML flashes for a frame. The
-         .app-shell/#minWidthAlert/#busyOverlay stay hidden behind
-         html:not(.app-ready) until main.js's own final setup step adds
-         the app-ready class (see the bottom of src/main.js) — not until
-         the stylesheet's own 'load' event, which used to be wired via an
-         inline onload="" attribute on the <link> below. That attribute
-         worked under `vite dev` (which serves this file untouched) but
-         silently vanished from `vite build`'s output: production rewrites
-         the <link>'s href to the hashed asset path and regenerates the
-         element from scratch, dropping any custom attribute on it
-         (id included) in the process — app-ready never got set, and the
-         whole app stayed invisible behind display:none forever. Gating on
-         main.js's own completion instead doesn't depend on anything Vite
-         does to this tag. -->
+         .app-shell/#busyOverlay stay hidden behind html:not(.app-ready)
+         until main.js's own final setup step adds the app-ready class (see
+         the bottom of src/main.js) — not until the stylesheet's own 'load'
+         event, which used to be wired via an inline onload="" attribute on
+         the <link> below. That attribute worked under `vite dev` (which
+         serves this file untouched) but silently vanished from `vite
+         build`'s output: production rewrites the <link>'s href to the
+         hashed asset path and regenerates the element from scratch,
+         dropping any custom attribute on it (id included) in the process —
+         app-ready never got set, and the whole app stayed invisible behind
+         display:none forever. Gating on main.js's own completion instead
+         doesn't depend on anything Vite does to this tag. -->
     <style>
       html, body { background: #eef3f8; }
       #pageLoader {
@@ -40,20 +44,26 @@
       }
       html.app-ready #pageLoader { display: none; }
       html:not(.app-ready) .app-shell,
-      html:not(.app-ready) #minWidthAlert,
       html:not(.app-ready) #busyOverlay {
         display: none !important;
       }
     </style>
     <link rel="stylesheet" href="/src/style.css">
+    <!-- App icon: the "Rivers" view render of test/prueba17.tmd5
+         (Robert Lang's tree-theory rivers, one of the app's own view
+         presets — see VIEW_PRESETS.rivers in src/main.js), captured as a
+         canvas screenshot and inlined as data: URIs so it survives both
+         the regular multi-file build and the offline single-file build
+         (vite.config.singlefile.js) with no separate asset file needed. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,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">
+    <link rel="icon" type="image/png" sizes="16x16" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAABLAAAASwGcd3rFAAAAGXRFWHRTb2Z0d2FyZQB3d3cuaW5rc2NhcGUub3Jnm+48GgAAAqNJREFUOI19k19IVGkYxn9nzrG0zFB3yLLd/mx/oAuXhlhWiILEiEC6GIXqKjmgYhTFjF0UERLt1rILq1sEUwmRREHsbnmzsAshiQSRRRDbRrQ1U2qmNWMzzoxn5jxdWMop2efu/d6P53uf53k/Y33lCtVs3oy7qIxkKsn/wR1L4CuZDwUWAH19fVjfLF3O2NMoJxauZcG6bynaWYu5qGxWgmTHVYrqt2BW+gFoaWnBZ62sZH9NHQfG7pGvCTDR1UN8709kevogl/cQKJcHy5ypJSzfgnksj+dob29n3/fHiUQiFJsW2T9vkzh8Fl9ZCfN2bcVcVgF5F8P0eUgtSRQE1vJ1xiQcDmPbNl1dXRTWbaSwbiP5oVEyv/eSe/IC9+079Iksn2EYFO3YRPp6L1VVVbS1tWHbNtlsFgBz8RfMbw2SDjVw3nxF8tQlEofPknv0fIqhqalJkhQ/+Is06UiSBgYGZNu2HGeqHh4eVjAY1ODgoCQp9/K13v18WUe3NWiaYOKPXmX+vqOP6O/vV2Njo2KxmILBoIaGhvQp4odOy/qopXDbd4wfO8fcmg0AVFdXMzIyQtOOBi72/Ia/ouLzXCWmLTXmzgHDQOMpAGKxGN3d3VzoOE3BD5dRZnL27Wpubp4eKXvrviau/KVoNKr6+nqNjo5KkpzHUb1tOSU3lfZKaPtVPtJZnAdPcO4+Qq5L7MZNQqEQkUiE8vLyqaxXf0lxaDeJUCdKZbwxMvGB4J9nKJ7E7/cTOfEjpaWl3oVZtZTi8G4SoQ6UTM80WltbPWM5/z5X8sy1zxyf7j99qTfNJ+WOpxQPd8pnGIb3pTVf4Tz8b3bDAGvFEkqO7CEe7kSTDkYgEFBtba3nknPvMUert2MWWJ5zNzHz3ZVMk+1/wHtHL5edNXMBuQAAAABJRU5ErkJggg==">
   </head>
   <body>
     <div id="pageLoader" data-i18n="app.loading">Cargando...</div>
-    <div id="minWidthAlert" class="min-width-alert" role="alert" data-i18n="app.minWidthWarning">This app requires a browser window at least 1300px wide. Widen your window or scroll horizontally.</div>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-header">
-          <h1 data-i18n="app.title">TreeMaker Web</h1>
+          <h1><span data-i18n="app.title">TreeMaker Web</span><span id="appVersionBadge" class="app-version"></span></h1>
           <hr />
         </div>
 
@@ -77,7 +87,8 @@
             <button id="viewDesign" class="view-preset active" type="button" data-i18n="view.design">Design</button>
             <button id="viewCreases" class="view-preset" type="button" disabled data-i18n="view.creasesMode">Creases</button>
             <button id="viewPlan" class="view-preset" type="button" disabled data-i18n="view.plan">Plan</button>
-            <button id="viewBlueprint" class="view-preset" type="button" disabled data-i18n="view.blueprint">Blueprint</button>
+            <button id="viewBlueprint" class="view-preset" type="button" disabled data-i18n="view.blueprint" style="display: none;">Blueprint</button>
+            <button id="viewRivers" class="view-preset" type="button" disabled data-i18n="view.rivers" style="display: none;">Rivers</button>
             <button id="viewFoldedForm" class="view-preset" type="button" disabled data-i18n="view.foldedForm">Folded Form</button>
             <!-- Not a view-mode toggle like the rest of this grid (opens a
                  modal instead — see #vertexListOverlay), just placed and
@@ -239,6 +250,12 @@
           </div>
         </details>
 
+        <!-- Reference Finder (manual search, not tied to a tree selection) -->
+        <details class="panel collapsible" id="rfManualDetails">
+          <summary data-i18n="section.referenceFinder">Reference Finder</summary>
+          <p id="rfManualHint" class="hint hint-action" role="button" tabindex="0" data-i18n="rf.manualHint">To hide Reference Finder, click here or the × in the top-right corner of the right panel.</p>
+        </details>
+
         <!-- Preferences -->
         <details class="panel collapsible">
           <summary data-i18n="section.preferences">Preferences</summary>
@@ -251,9 +268,10 @@
 
             <label for="colorThemeSelect" data-i18n="prefs.colorTheme">Color theme</label>
             <select id="colorThemeSelect">
-              <option value="gray" data-i18n="prefs.colorThemeGray">Gray-Black</option>
+              <option value="gray" data-i18n="prefs.colorThemeGray">Dark</option>
               <option value="blue" data-i18n="prefs.colorThemeBlue">Sky Blue</option>
-              <option value="light" data-i18n="prefs.colorThemeLight">Light Gray</option>
+              <option value="light" data-i18n="prefs.colorThemeLight">Light</option>
+              <option value="green" data-i18n="prefs.colorThemeGreen">Forest Green</option>
             </select>
 
             <label for="optimizationAlgorithm" data-i18n="prefs.optimization">Optimization</label>
@@ -262,13 +280,11 @@
             </select>
           </div>
 
-          <label><input id="scaleAllowDifferentLayoutCheckbox" type="checkbox" /> <span data-i18n="solver.allowDifferentLayout">Allow a higher-scoring but very different layout</span></label>
-        </details>
-
-        <!-- Reference Finder (manual search, not tied to a tree selection) -->
-        <details class="panel collapsible" id="rfManualDetails">
-          <summary data-i18n="section.referenceFinder">Reference Finder</summary>
-          <p id="rfManualHint" class="hint hint-action" role="button" tabindex="0" data-i18n="rf.manualHint">To hide Reference Finder, click here or the × in the top-right corner of the right panel.</p>
+          <div class="prefs-checkboxes">
+            <label><input id="scaleAllowDifferentLayoutCheckbox" type="checkbox" /> <span data-i18n="solver.allowDifferentLayout">Allow a higher-scoring but very different layout</span></label>
+            <label><input id="autoCollapseSectionsCheckbox" type="checkbox" /> <span data-i18n="prefs.autoCollapseSections">Auto-collapse sections</span></label>
+            <label><input id="showStartupWarningsCheckbox" type="checkbox" checked /> <span data-i18n="prefs.showStartupWarnings">Show warnings on startup</span></label>
+          </div>
         </details>
 
         <!-- Pinned to the sidebar's bottom edge (.sidebar-footer's
@@ -340,20 +356,20 @@
 
           <div id="symmetryType" class="symmetry-cards" role="group" data-i18n-aria-label="tree.symmetry" aria-label="Symmetry">
             <button type="button" class="symmetry-card active" data-value="none">
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#ffffff" stroke-width="1.5" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" />
               </svg>
               <span data-i18n="symmetry.none">None</span>
             </button>
             <button type="button" class="symmetry-card" data-value="book">
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#ffffff" stroke-width="1.5" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" />
                 <line x1="12" y1="3" x2="12" y2="21" />
               </svg>
               <span data-i18n="symmetry.book">Book</span>
             </button>
             <button type="button" class="symmetry-card" data-value="diagonal">
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#ffffff" stroke-width="1.5" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" />
                 <line x1="3" y1="21" x2="21" y2="3" />
               </svg>
@@ -374,6 +390,8 @@
           <div class="rf-mode-row">
             <label><input id="rfManualModePoint" type="radio" name="rfManualMode" value="point" checked autocomplete="off" /> <span data-i18n="rf.mode.point">Point</span></label>
             <label><input id="rfManualModeLine" type="radio" name="rfManualMode" value="line" autocomplete="off" /> <span data-i18n="rf.mode.line">Line</span></label>
+            <label><input id="rfManualModeHorizontal" type="radio" name="rfManualMode" value="horizontal" autocomplete="off" /> <span data-i18n="rf.mode.horizontal">Horizontal</span></label>
+            <label><input id="rfManualModeVertical" type="radio" name="rfManualMode" value="vertical" autocomplete="off" /> <span data-i18n="rf.mode.vertical">Vertical</span></label>
           </div>
 
           <div class="rf-coord-row">
@@ -790,9 +808,19 @@
     <!-- About modal (sidebar's own "About" button, pinned to its bottom
          edge — see .sidebar-footer). -->
     <div id="aboutOverlay" class="busy-overlay" style="display: none;">
-      <div class="busy-box prompt-box">
-        <p class="prompt-title" data-i18n="about.title">About</p>
-        <p class="prompt-info" data-i18n="about.text">TreeMaker SPA is a browser-based reimplementation of Robert J. Lang's TreeMaker, the origami design tool.</p>
+      <div class="busy-box prompt-box about-box">
+        <img class="about-icon" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjxzdmcKICAgdmlld0JveD0iMCAwIDgwMCA4MDAiCiAgIHdpZHRoPSI4MDAiCiAgIGhlaWdodD0iODAwIgogICB2ZXJzaW9uPSIxLjEiCiAgIGlkPSJzdmcyMyIKICAgc29kaXBvZGk6ZG9jbmFtZT0idHJlZW1ha2Vyd2ViLnN2ZyIKICAgaW5rc2NhcGU6dmVyc2lvbj0iMS40LjMgKDBkMTVmNzUwNDIsIDIwMjUtMTItMjUpIgogICB4bWxuczppbmtzY2FwZT0iaHR0cDovL3d3dy5pbmtzY2FwZS5vcmcvbmFtZXNwYWNlcy9pbmtzY2FwZSIKICAgeG1sbnM6c29kaXBvZGk9Imh0dHA6Ly9zb2RpcG9kaS5zb3VyY2Vmb3JnZS5uZXQvRFREL3NvZGlwb2RpLTAuZHRkIgogICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciCiAgIHhtbG5zOnN2Zz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzCiAgICAgaWQ9ImRlZnMyMyIgLz4KICA8c29kaXBvZGk6bmFtZWR2aWV3CiAgICAgaWQ9Im5hbWVkdmlldzIzIgogICAgIHBhZ2Vjb2xvcj0iI2ZmZmZmZiIKICAgICBib3JkZXJjb2xvcj0iIzAwMDAwMCIKICAgICBib3JkZXJvcGFjaXR5PSIwLjI1IgogICAgIGlua3NjYXBlOnNob3dwYWdlc2hhZG93PSIyIgogICAgIGlua3NjYXBlOnBhZ2VvcGFjaXR5PSIwLjAiCiAgICAgaW5rc2NhcGU6cGFnZWNoZWNrZXJib2FyZD0iMCIKICAgICBpbmtzY2FwZTpkZXNrY29sb3I9IiNkMWQxZDEiCiAgICAgaW5rc2NhcGU6em9vbT0iMS4wMjc1IgogICAgIGlua3NjYXBlOmN4PSI0MDAuNDg2NjIiCiAgICAgaW5rc2NhcGU6Y3k9IjQwNy43ODU4OSIKICAgICBpbmtzY2FwZTp3aW5kb3ctd2lkdGg9IjE4NjYiCiAgICAgaW5rc2NhcGU6d2luZG93LWhlaWdodD0iMTAyNCIKICAgICBpbmtzY2FwZTp3aW5kb3cteD0iNTQiCiAgICAgaW5rc2NhcGU6d2luZG93LXk9IjMzIgogICAgIGlua3NjYXBlOndpbmRvdy1tYXhpbWl6ZWQ9IjEiCiAgICAgaW5rc2NhcGU6Y3VycmVudC1sYXllcj0ic3ZnMjMiIC8+CiAgPHJlY3QKICAgICB4PSIwIgogICAgIHk9IjAiCiAgICAgd2lkdGg9IjgwMCIKICAgICBoZWlnaHQ9IjgwMCIKICAgICBmaWxsPSJ3aGl0ZSIKICAgICBpZD0icmVjdDEiIC8+CiAgPCEtLSBib3JkZSBleHRlcmlvciBzb2xpZG8gLS0+CiAgPHJlY3QKICAgICB4PSIwIgogICAgIHk9IjAiCiAgICAgd2lkdGg9IjgwMCIKICAgICBoZWlnaHQ9IjgwMCIKICAgICBmaWxsPSJub25lIgogICAgIHN0cm9rZT0iIzAwMDAwMCIKICAgICBzdHJva2Utd2lkdGg9IjMiCiAgICAgaWQ9InJlY3QyIiAvPgogIDwhLS0gZGlhZ29uYWxlcyBwcmluY2lwYWxlcyBzb2xpZGFzICg0NSBncmFkb3MpIC0tPgogIDxwYXRoCiAgICAgaWQ9ImxpbmUyIgogICAgIHN0eWxlPSJzdHJva2U6IzAwMDAwMDtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5Om5vbmUiCiAgICAgZD0iTSA0MDAuOTczMjQsNDAwIDgwMCw4MDAiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMi0zIgogICAgIHN0eWxlPSJzdHJva2U6IzAwMDAwMDtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5Om5vbmUiCiAgICAgZD0iTSAyLjMzOTMyMjMsMy45MzUyODI0IDE4MC40NDE1MSwxODIuMDM3NDciCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMyIKICAgICBzdHlsZT0ic3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjUiCiAgICAgZD0iTSA4MDAsMCAwLDgwMCIgLz4KICA8IS0tIGNoZXZyb25zIHNvbGlkb3MgaW50ZXJub3MgKDQ1IGdyYWRvcykgLS0+CiAgPHBhdGgKICAgICBpZD0ibGluZTQiCiAgICAgc3R5bGU9InN0cm9rZTojMDAwMDAwO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6bm9uZSIKICAgICBkPSJNIDg4LjE1MDg0OSwyNzAuODAyOTIgMjcyLjc0OTM4LDkwLjA5NzMyMSIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmU1IgogICAgIHN0eWxlPSJzdHJva2U6IzAwMDAwMDtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5Om5vbmUiCiAgICAgZD0ibSA2MjAuNjgxMjgsMTgwLjYwODI2IDk0LjA4NzU4LDgwLjQ2MjMiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lNS05IgogICAgIHN0eWxlPSJzdHJva2U6I2U2MTk0YjtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5OjIwLCAxNCIKICAgICBkPSJNIDE4MS41MjI5NSwxODMuMTE0MTggMzk4LjIzODI4LDM5OC44NTYyOSIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmU1LTktNyIKICAgICBzdHlsZT0ic3Ryb2tlOiNlNjE5NGI7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheToyMCwgMTQiCiAgICAgZD0ibSA1MzcuNzA5MTQsODcuMDAyNjU4IDg1LjMyODQ3LDkwLjE5NDY2MiIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmU2IgogICAgIHN0eWxlPSJzdHJva2U6IzAwMDAwMDtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5Om5vbmUiCiAgICAgZD0ibSA2MTMuMzEyNjQsNjE3LjAyNzk5IC05NC41ODE0OSw5NS41NTQ3MiIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmU2LTIiCiAgICAgc3R5bGU9InN0cm9rZTojZTYxOTRiO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6MjAsIDE0O3N0cm9rZS1kYXNob2Zmc2V0OjA7c3Ryb2tlLW9wYWNpdHk6MSIKICAgICBkPSJtIDcxMC40NzI3OCw1MjEuNjY1MTIgLTk0LjU4MTQ5LDkzLjYwODI1IgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPHBhdGgKICAgICBpZD0ibGluZTciCiAgICAgc3R5bGU9InN0cm9rZTojMDAwMDAwO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6bm9uZSIKICAgICBkPSJNIDI3OC41ODg4MSw3MDguOTI5NDQgODQuMjU3OTA4LDUzNi4wMDk3MyIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDwhLS0gbXXDsW9uZXMgc29saWRvcyBzb2JyZSBsb3MgZWplcyAoOTAgZ3JhZG9zKSAtLT4KICA8cGF0aAogICAgIGlkPSJsaW5lOCIKICAgICBzdHlsZT0ic3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjUiCiAgICAgZD0iTSA0MDAsMCBWIDEyNS40MDE0NiIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lOSIKICAgICBzdHlsZT0ic3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheTpub25lIgogICAgIGQ9Ik0gNDAwLDgwMCAzOTkuMDI2NzYsNjc0LjU5ODU0IgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPHBhdGgKICAgICBpZD0ibGluZTktNyIKICAgICBzdHlsZT0ic3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheTpub25lIgogICAgIGQ9Ik0gMjc5LjU4MDI5LDc5OC45NDY0NyBWIDcwNi42MzUwMyIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmU5LTYiCiAgICAgc3R5bGU9InN0cm9rZTojMDAwMDAwO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6bm9uZSIKICAgICBkPSJtIDUzNy43MDQzNyw3OS44MTk5NTEgMCwtNzUuNzY2NDIzMSIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmUxMCIKICAgICBzdHlsZT0ic3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheTpub25lIgogICAgIGQ9Im0gMCw0MDAgMTI1LjQwMTQ2LC0wLjk3MzI0IgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPHBhdGgKICAgICBpZD0ibGluZTExIgogICAgIHN0eWxlPSJzdHJva2U6IzAwMDAwMDtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5Om5vbmUiCiAgICAgZD0ibSA4MDAsNDAwIC0xMjQuNDI4MjIsMC45NzMyNCIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmUxMS0yIgogICAgIHN0eWxlPSJzdHJva2U6IzAwMDAwMDtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5Om5vbmUiCiAgICAgZD0ibSA4My40ODQxODMsNTMzLjk0MDM3IC04MS42MDU4Mzc0LDAiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMTEtOCIKICAgICBzdHlsZT0ic3Ryb2tlOiMwMDAwMDA7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheTpub25lIgogICAgIGQ9Im0gNzk3LjA3MDU2LDUyMy45NTQ5OSAtODQuNTI1NTQsMCIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDwhLS0gY29udGludWFjaW9uIHB1bnRlYWRhIGRlIGxvcyBlamVzIGhhY2lhIGVsIGNlbnRybyAoOTAgZ3JhZG9zKSAtLT4KICA8bGluZQogICAgIHgxPSI0MDAiCiAgICAgeTE9IjE0MCIKICAgICB4Mj0iNDAwIgogICAgIHkyPSI0MDAiCiAgICAgc3Ryb2tlPSIjZTYxOTRiIgogICAgIHN0cm9rZS13aWR0aD0iNSIKICAgICBzdHJva2UtZGFzaGFycmF5PSIyMCwxNCIKICAgICBpZD0ibGluZTEyIiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmUxMi0zIgogICAgIHN0eWxlPSJzdHJva2U6I2U2MTk0YjtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5OjIwLCAxNCIKICAgICBkPSJNIDI3Mi4yNDc1NiwyLjc1NjY5MSAyNzEuMjc0MzIsODguNTQ3NDQiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMTItNSIKICAgICBzdHlsZT0ic3Ryb2tlOiNlNjE5NGI7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheToyMCwgMTQiCiAgICAgZD0ibSA1MjIuMDQzMTgsNzE1LjIwOTI4IC0xLjk0NjQ3LDgwLjkyNDU3IgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPGxpbmUKICAgICB4MT0iNDAwIgogICAgIHkxPSI2NjAiCiAgICAgeDI9IjQwMCIKICAgICB5Mj0iNDAwIgogICAgIHN0cm9rZT0iI2U2MTk0YiIKICAgICBzdHJva2Utd2lkdGg9IjUiCiAgICAgc3Ryb2tlLWRhc2hhcnJheT0iMjAsMTQiCiAgICAgaWQ9ImxpbmUxMyIgLz4KICA8bGluZQogICAgIHgxPSIxNDAiCiAgICAgeTE9IjQwMCIKICAgICB4Mj0iNDAwIgogICAgIHkyPSI0MDAiCiAgICAgc3Ryb2tlPSIjZTYxOTRiIgogICAgIHN0cm9rZS13aWR0aD0iNSIKICAgICBzdHJva2UtZGFzaGFycmF5PSIyMCwxNCIKICAgICBpZD0ibGluZTE0IiAvPgogIDxwYXRoCiAgICAgaWQ9ImxpbmUxNC05IgogICAgIHN0eWxlPSJzdHJva2U6I2U2MTk0YjtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5OjIwLCAxNCIKICAgICBkPSJNIDAuODQ2NzE1MzMsMjY2Ljk4OTY2IDg0LjY5MDk5MiwyNjguOTM2MTMiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMTQtMCIKICAgICBzdHlsZT0ic3Ryb2tlOiNlNjE5NGI7c3Ryb2tlLXdpZHRoOjU7c3Ryb2tlLWRhc2hhcnJheToyMCwgMTQiCiAgICAgZD0ibSA3MjAuMzQwNjUsMjYzLjgxMjA1IDc4LjAwNDg3LC0xMGUtNiIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgogIDxsaW5lCiAgICAgeDE9IjY2MCIKICAgICB5MT0iNDAwIgogICAgIHgyPSI0MDAiCiAgICAgeTI9IjQwMCIKICAgICBzdHJva2U9IiNlNjE5NGIiCiAgICAgc3Ryb2tlLXdpZHRoPSI1IgogICAgIHN0cm9rZS1kYXNoYXJyYXk9IjIwLDE0IgogICAgIGlkPSJsaW5lMTUiIC8+CiAgPCEtLSBsaW5lYXMgcHVudGVhZGFzIGRlc2RlIGxhcyBlc3F1aW5hcywgKy0yNy41IGdyYWRvcyByZXNwZWN0byBkZSBsYSBkaWFnb25hbCAtLT4KICA8cGF0aAogICAgIGlkPSJsaW5lMTYiCiAgICAgc3R5bGU9InN0cm9rZTojZTYxOTRiO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6MjAsIDE0IgogICAgIGQ9Ik0gMCwwIDM5OC4wNTM1MywxMjcuNjI1NzkiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMTciCiAgICAgc3R5bGU9InN0cm9rZTojZTYxOTRiO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6MjAsIDE0IgogICAgIGQ9Ik0gMCwwIDEyNy42MjU3OSw0MDAiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMTgiCiAgICAgc3R5bGU9InN0cm9rZTojZTYxOTRiO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6MjAsIDE0IgogICAgIGQ9Ik0gODAwLDAgNjcyLjM3NDIsNDAwIgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPHBhdGgKICAgICBpZD0ibGluZTE5IgogICAgIHN0eWxlPSJzdHJva2U6I2U2MTk0YjtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5OjIwLCAxNCIKICAgICBkPSJNIDgwMCwwIDQwMC45NzMyNCwxMjYuNjUyNTUiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMjAiCiAgICAgc3R5bGU9InN0cm9rZTojZTYxOTRiO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6MjAsIDE0IgogICAgIGQ9Ik0gODAwLDgwMCA0MDAsNjc1LjI5MzkxIgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPHBhdGgKICAgICBpZD0ibGluZTIxIgogICAgIHN0eWxlPSJzdHJva2U6I2U2MTk0YjtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5OjIwLCAxNCIKICAgICBkPSJNIDgwMCw4MDAgNjcyLjM3NDIsNDAwIgogICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2MiIC8+CiAgPHBhdGgKICAgICBpZD0ibGluZTIyIgogICAgIHN0eWxlPSJzdHJva2U6I2U2MTk0YjtzdHJva2Utd2lkdGg6NTtzdHJva2UtZGFzaGFycmF5OjIwLCAxNCIKICAgICBkPSJNIDAsODAwIDEyNi42NTI1NSwzOTkuMDI2NzYiCiAgICAgc29kaXBvZGk6bm9kZXR5cGVzPSJjYyIgLz4KICA8cGF0aAogICAgIGlkPSJsaW5lMjMiCiAgICAgc3R5bGU9InN0cm9rZTojZTYxOTRiO3N0cm9rZS13aWR0aDo1O3N0cm9rZS1kYXNoYXJyYXk6MjAsIDE0IgogICAgIGQ9Ik0gMCw4MDAgMzk5LjAyNjc2LDY3My4zNDc0NCIKICAgICBzb2RpcG9kaTpub2RldHlwZXM9ImNjIiAvPgo8L3N2Zz4K" width="96" height="96" alt="TreeMaker SPA — Rivers view">
+        <p class="about-heading" data-i18n="app.title">TreeMaker Web</p>
+        <!-- Rendered imperatively by renderAboutText() in main.js, not
+             data-i18n: it embeds a real <a> link (to the langorigami.com
+             article) inside the translated sentence, which the generic
+             applyStaticTranslations() pass can't do (plain textContent
+             only) — see renderAppVersion()'s own comment for the same
+             reasoning applied to interpolated text. -->
+        <p id="aboutText" class="prompt-info">TreeMaker Web is a browser-based reimplementation of Robert J. Lang's TreeMaker, the origami design tool.</p>
+        <a id="aboutGithubLink" class="about-link" href="#" target="_blank" rel="noopener" data-i18n="about.github">View source on GitHub</a>
+        <p id="aboutVersion" class="about-version"></p>
+        <ul id="aboutWarningsList" class="about-warnings" role="alert" hidden></ul>
         <div class="prompt-buttons">
           <button id="aboutCloseBtn" type="button" class="primary" data-i18n="dialog.close">Close</button>
         </div>

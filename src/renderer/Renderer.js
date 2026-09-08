@@ -43,11 +43,11 @@ export class Renderer {
     // CanvasRenderer._drawRivers()), null meaning "don't draw them" — off
     // everywhere except Blueprint View.
     this.riverFillColor = null;
-    // Distinct-colored highlight, Blueprint View only: every internal
-    // facet-corridor cut into pieces wherever a loose triangle overlaps it
-    // — see tmTree.getCorridorSegments() and CanvasRenderer.
-    // _drawCorridorSegments().
-    this.showCorridorSegments = false;
+    // Blueprint View only: outlines each internal facet-corridor (see
+    // tmTree.getWeldedCorridors()), cut into slices wherever it crosses a
+    // poly/subPoly boundary and each slice welded into its own polygon —
+    // drawn by CanvasRenderer._drawWeldedCorridors().
+    this.showWeldedCorridors = false;
     this.showEdges = true;
     this.showPaths = false;
     // Equivalent to mShowPolyFills: fills every tmPoly (at every
@@ -397,7 +397,7 @@ export class Renderer {
     if (this.showNodes) {
       let bestNode = null;
       let bestNodeDistSq = pointTol * pointTol;
-      for (const node of this.tree.getNodes()) {
+      for (const node of this.tree.getSelectableNodes()) {
         const dx = node.getLocX() - x;
         const dy = node.getLocY() - y;
         const distSq = dx * dx + dy * dy;

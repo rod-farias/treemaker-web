@@ -311,7 +311,7 @@ export class NodeEditor {
    */
   getPartsByType(partType) {
     const listByType = {
-      node: this.tree.getNodes(),
+      node: this.tree.getSelectableNodes(),
       edge: this.tree.getEdges(),
       path: this.tree.getPaths(),
       poly: this.tree.getAllPolys(),
@@ -483,7 +483,7 @@ export class NodeEditor {
   // original's own node+edge-only behavior is still available separately
   // as selectNodesAndEdges() below (its own button, and what Ctrl+A calls).
   selectAll() {
-    this.selectedNodes = [...this.tree.getNodes()];
+    this.selectedNodes = [...this.tree.getSelectableNodes()];
     this.selectedEdges = [...this.tree.getEdges()];
     this.selectedPaths = [...this.tree.getPaths()];
     this.selectedVertexKeys = this.tree.getVertices().map(v => this._vertexKey(v));
@@ -501,7 +501,7 @@ export class NodeEditor {
   // comment above for why that one is no longer this.
   selectNodesAndEdges() {
     this._clearDerivedSelection();
-    this.selectedNodes = [...this.tree.getNodes()];
+    this.selectedNodes = [...this.tree.getSelectableNodes()];
     this.selectedEdges = [...this.tree.getEdges()];
     this.selectedNode = null;
     this.selectedEdge = null;
@@ -515,7 +515,7 @@ export class NodeEditor {
   // nodes, unpinned non-length-fixed edges — see tmTree.filterMovableParts()).
   selectMovableParts() {
     this._clearDerivedSelection();
-    const { nodes, edges } = this.tree.filterMovableParts(this.tree.getNodes(), this.tree.getEdges());
+    const { nodes, edges } = this.tree.filterMovableParts(this.tree.getSelectableNodes(), this.tree.getEdges());
     this.selectedNodes = nodes;
     this.selectedEdges = edges;
     this.selectedNode = null;
@@ -546,6 +546,16 @@ export class NodeEditor {
   // CURRENTLY selected edges (so select the edge(s) first, then this).
   selectCorridorFacets() {
     const facets = this.tree.getCorridorFacets(this.selectedEdges);
+    this.selectParts({ facets });
+  }
+
+  // Blueprint View's own selection, no edge pre-selection needed (unlike
+  // selectCorridorFacets() above): every facet belonging to a corridor
+  // associated with an internal edge (tree.getInternalEdges() — both
+  // endpoints non-leaf, i.e. a river rather than a leaf's own reference
+  // circle).
+  selectInternalCorridorFacets() {
+    const facets = this.tree.getCorridorFacets(this.tree.getInternalEdges());
     this.selectParts({ facets });
   }
 

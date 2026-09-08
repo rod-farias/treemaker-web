@@ -100,7 +100,12 @@ export class CanvasRenderer extends Renderer {
     // facet picked via Select Part by Index never showed any highlight.
     this._drawFacets();
 
-    if (this.showCreases) {
+    // Rivers view (weldedRivers) draws the crease/fold skeleton AFTER the
+    // welded river shapes below instead of here, so the fold lines stay
+    // visible on top of the (now opaque, gap-free) river fill rather than
+    // being painted over by it — Blueprint keeps this earlier spot, since
+    // its own per-slice rainbow is what a reader is meant to inspect first.
+    if (this.showCreases && !this.weldedRivers) {
       this._drawCreases();
     }
 
@@ -138,9 +143,19 @@ export class CanvasRenderer extends Renderer {
     // Keep the paper outline visible above all generated geometry.
     this._drawPaperBoundary();
 
-    // Blueprint View's corridor-segment highlight — drawn last so it sits
-    // above every other layer, paper outline included.
-    this._drawCorridorSegments();
+    // Blueprint View's welded-corridor slices — drawn last so they sit
+    // above every other layer, paper outline included. Extensions first,
+    // so each slice's own crisp cap edge stays on top of the seam where
+    // the two meet.
+    this._drawRiverExtensions();
+    this._drawWeldedCorridors();
+
+    // See the showCreases skip above: Rivers view draws the fold lines
+    // here instead, once the welded rivers are already down, so they read
+    // on top of the river fill instead of underneath it.
+    if (this.showCreases && this.weldedRivers) {
+      this._drawCreases();
+    }
 
     // Restore context state
     this.ctx.restore();
@@ -354,6 +369,15 @@ export class CanvasRenderer extends Renderer {
       ))) continue;
 
       const selected = this.selectedObjects.includes(facet);
+      // Blueprint View selects every corridor facet (see NodeEditor.
+      // selectInternalCorridorFacets()) purely so the Inspector can report
+      // "N facets selected" — _drawWeldedCorridors() already draws each one
+      // as part of its own slice/sector, so the plain magenta selection
+      // outline this loop would otherwise give it underneath is only ever
+      // a redundant leftover, visible through any gap the slice/sector
+      // doesn't happen to cover (e.g. a "<" slice's own sector, which
+      // deliberately doesn't reach all the way to its cut-off tip).
+      if (selected && this.showWeldedCorridors) continue;
       if (!selected && !this.showFacets) continue;
 
       this.ctx.beginPath();
@@ -459,7 +483,11 @@ export class CanvasRenderer extends Renderer {
   }
 
   _drawGussetChains(chains) {
-    this.ctx.strokeStyle = this.colors.creaseAxial;
+    // Rivers view (weldedRivers) wants its fold lines reading as part of
+    // the same visual "reference" layer as the circle/river outlines —
+    // same color as those (this.colors.referenceLine) — rather than
+    // Blueprint's own plain black skeleton.
+    this.ctx.strokeStyle = this.weldedRivers ? this.colors.referenceLine : this.colors.creaseAxial;
     this.ctx.lineWidth = this.creaseWidth;
     for (const [major1, minor, major2] of chains) {
       const p1 = this.worldToScreen(major1.getLocX(), major1.getLocY());
@@ -513,7 +541,8 @@ export class CanvasRenderer extends Renderer {
           this.ctx.strokeStyle = this.colors.crease;
         }
       } else if (this.monochromeCreases) {
-        this.ctx.strokeStyle = this.colors.creaseAxial;
+        // Same reasoning as _drawGussetChains() above.
+        this.ctx.strokeStyle = this.weldedRivers ? this.colors.referenceLine : this.colors.creaseAxial;
       } else {
         // AGRH (Axial/Gusset/Ridge/Hinge) coloring: conveys each crease's
         // structural role instead of its fold direction — always solid.
@@ -699,6 +728,15 @@ export class CanvasRenderer extends Renderer {
    */
   _drawRivers() {
     if (!this.riverFillColor) return;
+    // Blueprint View's own welded-corridor slices (_drawWeldedCorridors())
+    // cover exactly this same set of facets — every internal edge's own
+    // corridor — with their own coloring, drawn later. Without this guard,
+    // this method's plain wash fill + _drawRiverOutline()'s gray outline
+    // sit underneath them as a redundant leftover, visible through any gap
+    // a slice/sector doesn't happen to cover (e.g. a "<" slice's own
+    // sector, which deliberately doesn't reach all the way to its cut-off
+    // tip).
+    if (this.showWeldedCorridors) return;
 
     const riverEdges = this.tree.getEdges().filter(edge => {
       const n1 = edge.getNode(0);
@@ -776,55 +814,320 @@ export class CanvasRenderer extends Renderer {
   }
 
   // A palette of visually distinct fills, cycled across whatever list of
-  // segments/pieces needs telling apart — _drawCorridorSegments() below is
-  // the only current caller, but nothing here ties it to that one case.
+  // slices/pieces needs telling apart — _drawWeldedCorridors() below is the
+  // only current caller, but nothing here ties it to that one case.
   static SEGMENT_COLOR_PALETTE = [
     '#f87171', '#fb923c', '#facc15', '#a3e635', '#4ade80', '#34d399',
     '#2dd4bf', '#22d3ee', '#60a5fa', '#818cf8', '#a78bfa', '#e879f9', '#fb7185'
   ];
 
   /**
-   * Blueprint View's own addition, with no original equivalent: fills, each
-   * in its own color from SEGMENT_COLOR_PALETTE, two kinds of cut into an
-   * internal facet-corridor's material — replacing the corridor's single
-   * welded outline (compare getWeldedCorridors()) with these distinctly
-   * colored pieces:
-   *
-   * - Segment A: tmTree.getCorridorSegments()'s "inside" pieces — wherever
-   *   a loose triangle overlaps a corridor.
-   * - tmTree.getPolygonCorridorSegments()'s "B"/"residue" pieces — cuts
-   *   whatever a loose triangle didn't already claim by recursing inward
-   *   through each first-order polygon's own non-triangle subPolys.
-   *
-   * Drawn last (see render()) so it sits above every other layer.
+   * Blueprint View's own addition, with no original equivalent: extends
+   * each internal river past however far its own crease-pattern facets
+   * happen to reach (tree.getRiverExtensions() — the true Robert Lang
+   * river runs the tree edge's whole length, out to the paper's own edge,
+   * regardless of how much of that the crease pattern actually needed).
+   * Styled the same as _drawRivers()'s own wash + outline — riverFillColor
+   * fill, referenceLine stroke — since this is exactly the same river,
+   * merely continuing past where real facet geometry stops.
    * @private
    */
-  _drawCorridorSegments() {
-    if (!this.showCorridorSegments) return;
-    const segmentsA = this.tree.getCorridorSegments().filter(s => s.kind === 'inside');
-    const segmentsPoly = this.tree.getPolygonCorridorSegments();
-    const segments = [...segmentsA, ...segmentsPoly];
-    if (segments.length === 0) return;
+  _drawRiverExtensions() {
+    if (!this.showWeldedCorridors || !this.riverFillColor) return;
+    const extensions = this.tree.getRiverExtensions();
+    if (extensions.length === 0) return;
 
-    const palette = CanvasRenderer.SEGMENT_COLOR_PALETTE;
-    this.ctx.lineWidth = 1.5;
-    segments.forEach((segment, i) => {
-      this.ctx.fillStyle = palette[i % palette.length];
-      this.ctx.strokeStyle = '#1f2937';
-      for (const ring of segment.rings) {
-        if (ring.length < 3) continue;
+    this.ctx.fillStyle = this.riverFillColor;
+    this.ctx.strokeStyle = this.colors.referenceLine;
+    this.ctx.lineWidth = 1;
+    for (const { rings, ringCuts } of extensions) {
+      rings.forEach((ring, ringIdx) => {
+        if (ring.length < 3) return;
         this.ctx.beginPath();
-        const first = this.worldToScreen(ring[0].getLocX(), ring[0].getLocY());
+        const first = this.worldToScreen(ring[0].x, ring[0].y);
         this.ctx.moveTo(first.x, first.y);
         for (let j = 1; j < ring.length; j += 1) {
-          const coord = this.worldToScreen(ring[j].getLocX(), ring[j].getLocY());
+          const coord = this.worldToScreen(ring[j].x, ring[j].y);
           this.ctx.lineTo(coord.x, coord.y);
         }
         this.ctx.closePath();
         this.ctx.fill();
-        this.ctx.stroke();
+        // Rivers view (weldedRivers) welds this extension onto the main
+        // corridor slice it continues — see _drawWeldedCorridors()'s own
+        // comment — by never stroking the cap edge the two share
+        // (ringCuts, from getRiverExtensions() marking it the same way
+        // getWeldedCorridors() marks a cut/seam). Blueprint keeps its own
+        // plain full-outline stroke, unchanged.
+        if (this.weldedRivers) {
+          this._strokeNaturalRingEdges(ring, [], (ringCuts && ringCuts[ringIdx]) || []);
+        } else {
+          this.ctx.stroke();
+        }
+      });
+    }
+  }
+
+  /**
+   * Rivers view's own addition (see VIEW_PRESETS.rivers / `weldedRivers`):
+   * strokes only `ring`'s NATURAL edges — the ones getWeldedCorridors()/
+   * getRiverExtensions() didn't mark as a `cut` (the seam where this piece
+   * touches the next piece of the same river) — leaving every seam
+   * unstroked so adjacent same-color pieces read as one welded river
+   * instead of a set of visibly separate tiles. `cuts[i]` mirrors the
+   * model's own convention: true when the edge ARRIVING at ring point i
+   * (from i-1) is a seam. `bends` (as in _drawRingWithBends()) rounds a
+   * natural corner into an arc; a bend is always between two natural edges
+   * (see getWeldedCorridors()'s own comment on _findBendVertices()), so it
+   * never needs to split across a stroke-run boundary.
+   * @private
+   */
+  _strokeNaturalRingEdges(ring, bends, cuts) {
+    const n = ring.length;
+    if (n < 2) return;
+    const screen = ring.map(p => this.worldToScreen(p.x, p.y));
+    const bendByIndex = new Map(bends.map(b => [b.index, b.radius]));
+    const arcTo = (i, next) => {
+      const afterNext = (next + 1) % n;
+      const center = screen[next];
+      const radius = bendByIndex.get(next) * this.zoom;
+      const angleFrom = Math.atan2(screen[i].y - center.y, screen[i].x - center.x);
+      const angleTo = Math.atan2(screen[afterNext].y - center.y, screen[afterNext].x - center.x);
+      let delta = angleTo - angleFrom;
+      while (delta <= -Math.PI) delta += 2 * Math.PI;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      this.ctx.arc(center.x, center.y, radius, angleFrom, angleTo, delta < 0);
+      return afterNext;
+    };
+    if (!cuts.some(Boolean)) {
+      // No seam anywhere on this ring (an untouched slice, or an extension
+      // whose own cap got clipped away) — stroke it as one closed loop
+      // exactly like the plain (non-weldedRivers) path, rather than an
+      // open one that would otherwise leave a stray gap at the seam this
+      // ring doesn't actually have.
+      this.ctx.beginPath();
+      this.ctx.moveTo(screen[0].x, screen[0].y);
+      let i = 0;
+      do {
+        const next = (i + 1) % n;
+        i = bendByIndex.has(next) ? arcTo(i, next) : (this.ctx.lineTo(screen[next].x, screen[next].y), next);
+      } while (i !== 0);
+      this.ctx.closePath();
+      this.ctx.stroke();
+      return;
+    }
+    const offset = cuts.findIndex(Boolean);
+    let i = offset;
+    let started = false;
+    do {
+      const next = (i + 1) % n;
+      if (cuts[next]) {
+        if (started) { this.ctx.stroke(); started = false; }
+        i = next;
+        continue;
       }
+      if (!started) {
+        this.ctx.beginPath();
+        this.ctx.moveTo(screen[i].x, screen[i].y);
+        started = true;
+      }
+      i = bendByIndex.has(next) ? arcTo(i, next) : (this.ctx.lineTo(screen[next].x, screen[next].y), next);
+    } while (i !== offset);
+    if (started) this.ctx.stroke();
+  }
+
+  /**
+   * Blueprint View's own addition, with no original equivalent: outlines
+   * each internal facet-corridor (tree.getWeldedCorridors() — grouped by
+   * tmPoly.calcFacetCorridorEdges(), same as _drawRivers()'s river strips)
+   * as one welded polygon PER slice, cut wherever the corridor crosses a
+   * poly/subPoly boundary of the design (see getWeldedCorridors()'s own
+   * comment for why that cut needs no clipping library). Each slice gets
+   * its own color from SEGMENT_COLOR_PALETTE so the cuts read clearly,
+   * distinct from the plain facet-selection highlight _drawFacets() already
+   * gives each individual triangle. Drawn last (see render()) so it sits
+   * above every other layer.
+   * @private
+   */
+  _drawWeldedCorridors() {
+    if (!this.showWeldedCorridors) return;
+    const slices = this.tree.getWeldedCorridors();
+    if (slices.length === 0) return;
+
+    const palette = CanvasRenderer.SEGMENT_COLOR_PALETTE;
+    this.ctx.lineWidth = 2.5;
+    slices.forEach((slice, i) => {
+      // Rivers view (weldedRivers — see VIEW_PRESETS.rivers) drops
+      // Blueprint's own per-slice rainbow: every slice/sector/extension
+      // belonging to the same internal edge is the same river, so they all
+      // get riverFillColor instead of their own SEGMENT_COLOR_PALETTE
+      // entry, and only each one's NATURAL edges get stroked (see
+      // _strokeNaturalRingEdges()) — never the cut edges where two pieces
+      // of that river touch — so the whole thing reads as one welded
+      // shape instead of Blueprint's clearly-separate colored tiles.
+      const color = this.weldedRivers ? this.riverFillColor : palette[i % palette.length];
+      this.ctx.fillStyle = color;
+      this.ctx.strokeStyle = this.weldedRivers ? this.colors.referenceLine : '#1f2937';
+      // A "<"-shaped slice (two cut edges — see getWeldedCorridors()'s own
+      // comment) is drawn as its annular sector instead of its own literal
+      // outline — see _drawCutSector(). Anything else (0 or 1 cut edge, no
+      // `crossing`) draws its plain welded outline instead — rounded at any
+      // of its own vertices getWeldedCorridors() flagged as a "bend" (see
+      // its _findBendVertices()), the same "<" wedge shape as a sector but
+      // formed by two of the ring's OWN edges meeting each other directly,
+      // not by two separate cuts whose carrier lines meet outside it.
+      if (slice.crossing) {
+        this._drawCutSector(slice.crossing, slice.cutSegments, color);
+        return;
+      }
+      slice.rings.forEach((ring, ringIdx) => {
+        if (ring.length < 3) return;
+        this._drawRingWithBends(ring, slice.bends || []);
+        this.ctx.fill();
+        if (this.weldedRivers) {
+          const cuts = (slice.ringCuts && slice.ringCuts[ringIdx]) || [];
+          this._strokeNaturalRingEdges(ring, slice.bends || [], cuts);
+        } else {
+          this.ctx.stroke();
+        }
+      });
     });
+  }
+
+  /**
+   * Blueprint View's own addition: traces `ring` (world-space points) as
+   * the current canvas path, replacing the corner at each of `bends`
+   * (getWeldedCorridors()' _findBendVertices() — `{ index, radius }` pairs)
+   * with an arc of that radius centered on the vertex itself, instead of
+   * the plain straight-line corner _drawWeldedCorridors() would otherwise
+   * draw there. Starts tracing from a non-bend vertex when the ring has
+   * one (simpler than special-casing the path's own start/close points
+   * landing exactly on a bend). Caller fills/strokes the path afterward.
+   * @private
+   */
+  _drawRingWithBends(ring, bends) {
+    const n = ring.length;
+    const bendByIndex = new Map(bends.map(b => [b.index, b.radius]));
+    let offset = 0;
+    for (let i = 0; i < n; i += 1) {
+      if (!bendByIndex.has(i)) { offset = i; break; }
+    }
+    const screen = ring.map(p => this.worldToScreen(p.x, p.y));
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(screen[offset].x, screen[offset].y);
+    let i = offset;
+    for (let steps = 0; steps < n; steps += 1) {
+      const next = (i + 1) % n;
+      if (bendByIndex.has(next)) {
+        const afterNext = (next + 1) % n;
+        const center = screen[next];
+        const radius = bendByIndex.get(next) * this.zoom;
+        const angleFrom = Math.atan2(screen[i].y - center.y, screen[i].x - center.x);
+        const angleTo = Math.atan2(screen[afterNext].y - center.y, screen[afterNext].x - center.x);
+        let delta = angleTo - angleFrom;
+        while (delta <= -Math.PI) delta += 2 * Math.PI;
+        while (delta > Math.PI) delta -= 2 * Math.PI;
+        this.ctx.arc(center.x, center.y, radius, angleFrom, angleTo, delta < 0);
+        i = afterNext;
+      } else {
+        this.ctx.lineTo(screen[next].x, screen[next].y);
+        i = next;
+      }
+      if (i === offset) break;
+    }
+    this.ctx.closePath();
+  }
+
+  /**
+   * Blueprint View's own addition: renders a "<"-shaped corridor slice —
+   * one cut off on both ends, its two cut sides (tree.getWeldedCorridors()'s
+   * own comment explains why they're always the same length) not parallel
+   * — as the annular sector their two carrier lines outline, IN PLACE OF
+   * that slice's own literal (straight-edged) outline. The two STRAIGHT
+   * sides of that sector are each cut side exactly as given — every point
+   * along it, not just its own two outer ends, since a cutting poly with
+   * more than one edge crossing the ring can put a real corner partway
+   * along one side — the same points the neighboring slice on the other
+   * side of that cut shares, so drawing them unchanged (rather than
+   * re-deriving the side from an angle and a radius) is what keeps this
+   * sector's own edge sitting exactly on top of that neighbor's — only the
+   * two "ends" connecting the sides (where the original outline zigzagged
+   * through its own natural, unweldable-into-one-straight-line corridor
+   * edges) are replaced with arcs, centered on `crossing` (where the two
+   * cut sides' own carrier lines — through each side's two OUTER ends —
+   * meet, extended if need be — often outside the slice itself, sometimes
+   * off the paper entirely) and radius the average of the two cut sides'
+   * own matching outer ends (their near ends for the inner arc, their far
+   * ends for the outer — "near"/"far" meaning relative to `crossing`; a
+   * real molecule's own construction keeps these two distances close
+   * enough for that average to read as one clean radius, not two visibly
+   * different ones).
+   * @private
+   */
+  _drawCutSector(crossing, cutSegments, color) {
+    const dist = (p) => Math.hypot(p.x - crossing.x, p.y - crossing.y);
+    // Orient each side's own point list to run near-to-far, so it can be
+    // traced in that order regardless of which end getWeldedCorridors()
+    // happened to list first.
+    const orient = (side) => (dist(side[0]) <= dist(side[side.length - 1]) ? side : [...side].reverse());
+    const side1 = orient(cutSegments[0]);
+    const side2 = orient(cutSegments[1]);
+    const near1 = side1[0];
+    const far1 = side1[side1.length - 1];
+    const near2 = side2[0];
+    const far2 = side2[side2.length - 1];
+
+    const innerRadius = ((dist(near1) + dist(near2)) / 2) * this.zoom;
+    const outerRadius = ((dist(far1) + dist(far2)) / 2) * this.zoom;
+    const angle1 = Math.atan2(far1.y - crossing.y, far1.x - crossing.x);
+    const angle2 = Math.atan2(far2.y - crossing.y, far2.x - crossing.x);
+    // Sweep whichever way covers the smaller (non-reflex) angle between the
+    // two lines — the real corner angle this sector traces, never the
+    // "long way around" complement of it.
+    let delta = angle2 - angle1;
+    while (delta <= -Math.PI) delta += 2 * Math.PI;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    const anticlockwise = delta < 0;
+
+    const target = this.worldToScreen(crossing.x, crossing.y);
+    const toScreen = (p) => this.worldToScreen(p.x, p.y);
+
+    this.ctx.beginPath();
+    const start1 = toScreen(side1[0]);
+    this.ctx.moveTo(start1.x, start1.y);
+    for (let i = 1; i < side1.length; i += 1) {
+      const pt = toScreen(side1[i]);
+      this.ctx.lineTo(pt.x, pt.y); // straight side 1 — cut side 1, unchanged, corner(s) and all
+    }
+    this.ctx.arc(target.x, target.y, outerRadius, angle1, angle2, anticlockwise); // outer arc
+    for (let i = side2.length - 1; i >= 0; i -= 1) {
+      const pt = toScreen(side2[i]);
+      this.ctx.lineTo(pt.x, pt.y); // snaps to cut side 2's own far end exactly, then traces it back to its near end
+    }
+    this.ctx.arc(target.x, target.y, innerRadius, angle2, angle1, !anticlockwise); // inner arc
+    this.ctx.closePath(); // snaps back to near1 exactly
+    this.ctx.fillStyle = color;
+    this.ctx.lineWidth = 1.5;
+    this.ctx.fill();
+    if (this.weldedRivers) {
+      // Rivers view welds this sector to its neighbors across side1/side2
+      // (both cut edges — the seams where the adjacent slices on either
+      // side of this "<" sit) by never stroking them, only the two arcs —
+      // always natural (see getWeldedCorridors()'s own comment: they
+      // replace the ring's own zigzag between its two cuts, not a cut
+      // itself), each traced as its own open path so the straight sides
+      // in between stay bare.
+      this.ctx.strokeStyle = this.colors.referenceLine;
+      this.ctx.beginPath();
+      this.ctx.arc(target.x, target.y, outerRadius, angle1, angle2, anticlockwise);
+      this.ctx.stroke();
+      this.ctx.beginPath();
+      this.ctx.arc(target.x, target.y, innerRadius, angle2, angle1, !anticlockwise);
+      this.ctx.stroke();
+    } else {
+      this.ctx.strokeStyle = '#1f2937';
+      this.ctx.stroke();
+    }
   }
 
   /**
@@ -832,7 +1135,7 @@ export class CanvasRenderer extends Renderer {
    * @private
    */
   _drawNodes() {
-    for (const node of this.tree.getNodes()) {
+    for (const node of this.tree.getSelectableNodes()) {
       const coord = this.worldToScreen(node.getLocX(), node.getLocY());
       const radius = this.nodeRadius;
 
@@ -964,7 +1267,7 @@ export class CanvasRenderer extends Renderer {
     this.ctx.textAlign = 'left';
 
     // Node labels
-    for (const node of this.tree.getNodes()) {
+    for (const node of this.tree.getSelectableNodes()) {
       if (!node.label) continue;
       // A node's label defaults to a plain sequential number and works as
       // its on-screen ID unless someone actually renamed it — see
@@ -1182,11 +1485,40 @@ export class CanvasRenderer extends Renderer {
   }
 
   /**
-   * Handle window resize
+   * Handle window resize. `width`/`height` are CSS pixels (the caller reads
+   * them off `getBoundingClientRect()`) — every other method on this class
+   * draws in that same CSS-pixel space via `this.width`/`this.height` and
+   * worldToScreen(), so that logical size is what they keep meaning.
+   *
+   * The canvas's own BITMAP needs more actual pixels than that on any
+   * HiDPI display (devicePixelRatio > 1: a laptop's Retina-style screen, or
+   * a desktop monitor with OS-level scaling turned on, are both common, not
+   * exotic): sizing the bitmap to exactly the CSS pixel count, as this used
+   * to, leaves the canvas with only one real sample per CSS pixel, well
+   * under what the display can actually show — and unlike a blanket
+   * "everything looks a little soft" loss, that shortfall shows up as
+   * visible, browser-specific pixel geometry once a shape's own edge
+   * doesn't land on a whole bitmap pixel (a thin, precisely-angled
+   * quadrilateral among them: only a few bitmap pixels wide, so each one's
+   * own antialiased coverage fraction dominates its look, and Chromium and
+   * Firefox don't rasterize that coverage identically) — reported as the
+   * SAME weld producing a differently-warped-looking quad in each browser,
+   * despite getWeldedCorridors() itself returning byte-identical geometry
+   * in both (confirmed directly: this shape's own ring and cutSegments,
+   * logged from the live page, matched this codebase's own computed values
+   * exactly). Scaling the bitmap up to the display's real pixel density —
+   * and scaling the drawing context to match, so every existing CSS-pixel
+   * coordinate in the rest of this class keeps landing in the same visual
+   * place — gives the browser's own rasterizer enough real samples that
+   * there's no longer a thin coverage fraction for it to disagree about.
    */
   onResize(width, height) {
-    this.canvas.width = width;
-    this.canvas.height = height;
+    const dpr = window.devicePixelRatio || 1;
+    this.canvas.width = Math.round(width * dpr);
+    this.canvas.height = Math.round(height * dpr);
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.width = width;
     this.height = height;
     this.render();

@@ -19,6 +19,7 @@ import { t, getLanguage, setLanguage, initI18n } from './i18n/i18n.js';
 import { bindPersistedSelect, bindPersistedCheckbox } from './ui/persistedPrefs.js';
 import * as rfClient from './referenceFinderClient.js';
 import { showFoldDiagrams, resetFoldDiagrams, renderTargetSVG, renderResultSVG } from './rfDiagramView.js';
+import { version as APP_VERSION } from '../package.json';
 
 // Reveals .app-shell/#minWidthAlert/#busyOverlay (see the html:not(.app-ready)
 // rule in index.html's inline critical CSS), replacing the "loading"
@@ -64,6 +65,7 @@ const viewCreasesBtn = document.getElementById('viewCreases');
 const viewPlanBtn = document.getElementById('viewPlan');
 const viewFoldedFormBtn = document.getElementById('viewFoldedForm');
 const viewBlueprintBtn = document.getElementById('viewBlueprint');
+const viewRiversBtn = document.getElementById('viewRivers');
 const buildCpBtn = document.getElementById('buildCpBtn');
 const killCpBtn = document.getElementById('killCpBtn');
 const solverStatus = document.getElementById('solverStatus');
@@ -72,6 +74,8 @@ const unpinAllBtn = document.getElementById('unpinAllBtn');
 const scaleAllowDifferentLayoutCheckbox = document.getElementById('scaleAllowDifferentLayoutCheckbox');
 const optimizationAlgorithmSelect = document.getElementById('optimizationAlgorithm');
 const colorThemeSelect = document.getElementById('colorThemeSelect');
+const autoCollapseSectionsCheckbox = document.getElementById('autoCollapseSectionsCheckbox');
+const showStartupWarningsCheckbox = document.getElementById('showStartupWarningsCheckbox');
 const scaleSelectionBtn = document.getElementById('scaleSelectionBtn');
 const minimizeStrainBtn = document.getElementById('minimizeStrainBtn');
 const selectPartType = document.getElementById('selectPartType');
@@ -142,6 +146,11 @@ const vertexListBody = document.getElementById('vertexListBody');
 const aboutBtn = document.getElementById('aboutBtn');
 const aboutOverlay = document.getElementById('aboutOverlay');
 const aboutCloseBtn = document.getElementById('aboutCloseBtn');
+const appVersionBadge = document.getElementById('appVersionBadge');
+const aboutVersion = document.getElementById('aboutVersion');
+const aboutWarningsList = document.getElementById('aboutWarningsList');
+const aboutText = document.getElementById('aboutText');
+const aboutGithubLink = document.getElementById('aboutGithubLink');
 const resetBtn = document.getElementById('resetBtn');
 const editResetBtn = document.getElementById('editResetBtn');
 const busyOverlay = document.getElementById('busyOverlay');
@@ -548,6 +557,8 @@ const rfManualHint = document.getElementById('rfManualHint');
 const rfManualProperties = document.getElementById('rfManualProperties');
 const rfManualModePoint = document.getElementById('rfManualModePoint');
 const rfManualModeLine = document.getElementById('rfManualModeLine');
+const rfManualModeHorizontal = document.getElementById('rfManualModeHorizontal');
+const rfManualModeVertical = document.getElementById('rfManualModeVertical');
 // Firefox restores a radio group's last-checked state on a plain page
 // reload (see the paperSizeInches/paperWidth/symLocX inputs for the same
 // pattern elsewhere), which would leave "Line" checked while the X2/Y2
@@ -557,6 +568,8 @@ const rfManualModeLine = document.getElementById('rfManualModeLine');
 // whatever the browser tried to restore.
 rfManualModePoint.checked = true;
 rfManualModeLine.checked = false;
+rfManualModeHorizontal.checked = false;
+rfManualModeVertical.checked = false;
 const rfManualX1 = document.getElementById('rfManualX1');
 const rfManualY1 = document.getElementById('rfManualY1');
 const rfManualX2 = document.getElementById('rfManualX2');
@@ -842,11 +855,21 @@ const VIEW_PRESETS = {
   // drawn black/gray via monochromeCreases instead of AGRH's red ridge
   // color) and real node names (onlyCustomLabels skips the auto-numbered
   // default), with none of the working-mode clutter (node/edge markers,
-  // conditions, polys/facets/paths). `corridorSegments` is this SPA's own
-  // addition too: distinctly-colors every piece an internal facet-corridor
-  // gets cut into wherever a loose triangle overlaps it — see
-  // tmTree.getCorridorSegments() and CanvasRenderer._drawCorridorSegments().
-  blueprint: { nodes: false, edges: false, creases: true, creaseFolds: false, minorCreases: false, monochromeCreases: true, vertices: false, vertexDots: false, vertexCoords: false, polys: false, facets: false, paths: false, conditions: false, labels: true, onlyCustomLabels: true, circles: true, nodeCircleFill: BLUEPRINT_WASH_COLOR, riverFill: BLUEPRINT_WASH_COLOR, corridorSegments: true }
+  // conditions, polys/facets/paths). `weldedCorridors` is this SPA's own
+  // addition too: outlines each internal facet-corridor (selected on click
+  // — see viewBlueprintBtn's listener below) as one welded polygon, the
+  // union of all its facets with the shared internal seams dropped — see
+  // tmTree.getWeldedCorridors() and CanvasRenderer._drawWeldedCorridors().
+  blueprint: { nodes: false, edges: false, creases: true, creaseFolds: false, minorCreases: false, monochromeCreases: true, vertices: false, vertexDots: false, vertexCoords: false, polys: false, facets: false, paths: false, conditions: false, labels: true, onlyCustomLabels: true, circles: true, nodeCircleFill: BLUEPRINT_WASH_COLOR, riverFill: BLUEPRINT_WASH_COLOR, weldedCorridors: true },
+  // Rivers: Blueprint's own "finished" counterpart — same reference circles
+  // and crease skeleton, but every corridor-facet slice/sector/edge-
+  // extension belonging to the same internal tree edge reads as ONE welded
+  // river instead of Blueprint's per-slice rainbow (see
+  // CanvasRenderer._drawWeldedCorridors()'s `weldedRivers` mode: same fill
+  // color throughout, no stroke on the seams between adjacent pieces of the
+  // same river, only on its true outer boundary) — the fold lines still
+  // draw on top of it, same as Blueprint's own crease skeleton.
+  rivers: { nodes: false, edges: false, creases: true, creaseFolds: false, minorCreases: false, monochromeCreases: true, vertices: false, vertexDots: false, vertexCoords: false, polys: false, facets: false, paths: false, conditions: false, labels: true, onlyCustomLabels: true, circles: true, nodeCircleFill: BLUEPRINT_WASH_COLOR, riverFill: BLUEPRINT_WASH_COLOR, weldedCorridors: true, weldedRivers: true }
 };
 
 /**
@@ -883,7 +906,8 @@ function setViewPreset(name) {
     renderer.showNodeCircles = preset.circles;
     renderer.nodeCircleFillColor = preset.nodeCircleFill || null;
     renderer.riverFillColor = preset.riverFill || null;
-    renderer.showCorridorSegments = !!preset.corridorSegments;
+    renderer.showWeldedCorridors = !!preset.weldedCorridors;
+    renderer.weldedRivers = !!preset.weldedRivers;
   }
   document.querySelectorAll('.view-preset').forEach(button => {
     button.classList.toggle('active', button.id === `view${name[0].toUpperCase()}${name.slice(1)}`);
@@ -1310,15 +1334,77 @@ rfManualHint.addEventListener('keydown', (e) => {
   closeRfManual();
 });
 
+// Reads the currently-checked radio as one of the four search modes.
+function getRfManualMode() {
+  if (rfManualModeLine.checked) return 'line';
+  if (rfManualModeHorizontal.checked) return 'horizontal';
+  if (rfManualModeVertical.checked) return 'vertical';
+  return 'point';
+}
+
+// Checks the radio for `mode` and unchecks the other three — the one place
+// that changes which radio is checked, so no caller can leave a stale mode
+// checked alongside the new one (see renderRfSavedQueries()/
+// activateOriginSearch() below, which only ever pass 'point' or 'line').
+function setRfManualMode(mode) {
+  rfManualModePoint.checked = mode === 'point';
+  rfManualModeLine.checked = mode === 'line';
+  rfManualModeHorizontal.checked = mode === 'horizontal';
+  rfManualModeVertical.checked = mode === 'vertical';
+}
+
+// Horizontal/Vertical both run a line search (through X1,Y1 and a derived
+// X2,Y2) — only Point runs a point search.
+function isRfManualLineMode(mode) {
+  return mode !== 'point';
+}
+
+// Horizontal locks X2/Y2 to (0, Y1) — a horizontal line through (X1,Y1);
+// Vertical locks them to (X1, 0) — a vertical line through (X1,Y1). No-op
+// for Point/Line, whose X2/Y2 aren't derived from X1/Y1.
+function applyRfManualDerivedCoords(mode) {
+  if (mode === 'horizontal') {
+    rfManualX2.value = '0';
+    rfManualY2.value = rfManualY1.value;
+  } else if (mode === 'vertical') {
+    rfManualX2.value = rfManualX1.value;
+    rfManualY2.value = '0';
+  }
+}
+
+// Line's own X2/Y2, remembered across a detour through another mode so
+// re-selecting Line restores them instead of whatever Horizontal/Vertical
+// (or Point, which disables but doesn't touch them) left behind.
+let rfManualLineMemory = null;
+let rfManualPrevMode = 'point';
+
 function syncRfManualModeFields() {
-  const isLine = rfManualModeLine.checked;
-  rfManualX2.disabled = !isLine;
-  rfManualY2.disabled = !isLine;
+  const mode = getRfManualMode();
+
+  if (rfManualPrevMode === 'line' && mode !== 'line') {
+    rfManualLineMemory = { x2: rfManualX2.value, y2: rfManualY2.value };
+  }
+
+  rfManualX2.disabled = mode === 'point';
+  rfManualY2.disabled = mode === 'point';
+  rfManualX2.readOnly = mode === 'horizontal' || mode === 'vertical';
+  rfManualY2.readOnly = mode === 'horizontal' || mode === 'vertical';
+
+  if (mode === 'line' && rfManualPrevMode !== 'line' && rfManualLineMemory) {
+    rfManualX2.value = rfManualLineMemory.x2;
+    rfManualY2.value = rfManualLineMemory.y2;
+  } else {
+    applyRfManualDerivedCoords(mode);
+  }
+
+  rfManualPrevMode = mode;
   renderRfTargetDiagram();
   clearRfManualResults();
 }
 rfManualModePoint.addEventListener('change', syncRfManualModeFields);
 rfManualModeLine.addEventListener('change', syncRfManualModeFields);
+rfManualModeHorizontal.addEventListener('change', syncRfManualModeFields);
+rfManualModeVertical.addEventListener('change', syncRfManualModeFields);
 
 // Any parameter edit invalidates the results shown for the previous
 // parameters — clear the central panel (results cards, fold diagrams, "no
@@ -1339,12 +1425,19 @@ function clearRfManualResults() {
 // search would run against, redrawn on every edit so it stays a live
 // preview rather than something that only updates once a search runs.
 function renderRfTargetDiagram() {
-  const mode = rfManualModeLine.checked ? 'line' : 'point';
+  const mode = isRfManualLineMode(getRfManualMode()) ? 'line' : 'point';
   const p1 = { x: Number(rfManualX1.value), y: Number(rfManualY1.value) };
   const p2 = { x: Number(rfManualX2.value), y: Number(rfManualY2.value) };
   rfTargetSvg.innerHTML = renderTargetSVG(mode, p1, p2, tree.getPaperWidth(), tree.getPaperHeight(), 170);
 }
-[rfManualX1, rfManualY1, rfManualX2, rfManualY2].forEach((input) => {
+[rfManualX1, rfManualY1].forEach((input) => {
+  input.addEventListener('input', () => {
+    applyRfManualDerivedCoords(getRfManualMode());
+    renderRfTargetDiagram();
+    clearRfManualResults();
+  });
+});
+[rfManualX2, rfManualY2].forEach((input) => {
   input.addEventListener('input', () => {
     renderRfTargetDiagram();
     clearRfManualResults();
@@ -1384,7 +1477,7 @@ async function runRfManualSearch() {
   document.body.style.cursor = 'wait';
   try {
     await ensureRfBuilt();
-    rfManualResults = rfManualModeLine.checked
+    rfManualResults = isRfManualLineMode(getRfManualMode())
       ? await rfClient.findLines(p1, { x: Number(rfManualX2.value), y: Number(rfManualY2.value) }, RF_SEARCH_NUM)
       : await rfClient.findMarks(p1, RF_SEARCH_NUM);
     rfManualSelectedIndex = -1;
@@ -1443,8 +1536,7 @@ function round4(n) {
 }
 
 function activateOriginSearch({ mode, target }) {
-  rfManualModePoint.checked = mode === 'point';
-  rfManualModeLine.checked = mode === 'line';
+  setRfManualMode(mode);
   syncRfManualModeFields();
   if (mode === 'point') {
     rfManualX1.value = formatNumeric(target.x);
@@ -1495,8 +1587,7 @@ function renderRfSavedQueries() {
     info.append(target, meta);
     row.appendChild(info);
     row.addEventListener('click', async () => {
-      rfManualModePoint.checked = query.mode === 'point';
-      rfManualModeLine.checked = query.mode === 'line';
+      setRfManualMode(query.mode);
       syncRfManualModeFields();
       rfManualX1.value = formatNumeric(query.x1);
       rfManualY1.value = formatNumeric(query.y1);
@@ -1536,7 +1627,11 @@ rfManualSaveBtn.addEventListener('click', () => {
 
   tree.rfSavedQueries.push({
     id: Math.random().toString(36).substr(2, 9),
-    mode: rfManualModeLine.checked ? 'line' : 'point',
+    // Horizontal/Vertical are saved as plain 'line' queries: X1..Y2 already
+    // fully capture the search (see isRfManualLineMode()), and restoring a
+    // saved query only ever needs Point vs Line to pick findMarks() vs
+    // findLines() and whether X2/Y2 are shown at all.
+    mode: isRfManualLineMode(getRfManualMode()) ? 'line' : 'point',
     x1: round4(Number(rfManualX1.value)),
     y1: round4(Number(rfManualY1.value)),
     x2: round4(Number(rfManualX2.value)),
@@ -1883,9 +1978,16 @@ for (const card of symmetryCards) card.addEventListener('click', () => {
   commitAndRender();
 });
 
+// Tracks the previous row count across renders so updateConditionList()
+// can tell "a condition was just added" apart from "render() ran again for
+// an unrelated reason" (selecting a different node, dragging it, etc.) —
+// only the former should auto-scroll the Inspector.
+let lastConditionCount = 0;
+
 function updateConditionList() {
   conditionList.replaceChildren();
-  for (const condition of tree.getConditions()) {
+  const conditions = tree.getConditions();
+  for (const condition of conditions) {
     const row = document.createElement('div');
     row.className = 'condition-row';
     const label = document.createElement('span');
@@ -1903,6 +2005,16 @@ function updateConditionList() {
     row.appendChild(removeButton);
     conditionList.appendChild(row);
   }
+  // A new condition was just added (not just a re-render triggered by
+  // something else) and the panel is tall enough that the sticky fields
+  // above can leave "Active Conditions" scrolled out of view (e.g. a short
+  // browser window) — scrollIntoView({block:'nearest'}) is a no-op when
+  // the element is already visible, so this never yanks the view around
+  // unnecessarily.
+  if (conditions.length > lastConditionCount) {
+    conditionListPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  lastConditionCount = conditions.length;
 }
 
 /**
@@ -1916,7 +2028,7 @@ function render() {
     // that invalidates it) while one of those was the active view, fall
     // back to Design instead of leaving an unreachable view selected.
     const hasCreasePattern = tree.getCreases().length > 0;
-    if (!hasCreasePattern && (viewCreasesBtn.classList.contains('active') || viewPlanBtn.classList.contains('active') || viewFoldedFormBtn.classList.contains('active') || viewBlueprintBtn.classList.contains('active'))) {
+    if (!hasCreasePattern && (viewCreasesBtn.classList.contains('active') || viewPlanBtn.classList.contains('active') || viewFoldedFormBtn.classList.contains('active') || viewBlueprintBtn.classList.contains('active') || viewRiversBtn.classList.contains('active'))) {
       setViewPreset('design');
     }
     renderer.render();
@@ -1928,6 +2040,7 @@ function render() {
     viewPlanBtn.disabled = !hasCreasePattern;
     viewFoldedFormBtn.disabled = !hasCreasePattern;
     viewBlueprintBtn.disabled = !hasCreasePattern;
+    viewRiversBtn.disabled = !hasCreasePattern;
     vertexListBtn.disabled = !hasCreasePattern;
     // Equivalent to tmwxDoc::OnSelectPartByIndexUpdateUI(), extended to
     // keep the whole index list (not just an enable flag) in sync with the
@@ -2170,7 +2283,25 @@ viewTreeBtn.addEventListener('click', () => applyViewPreset('tree'));
 viewCreasesBtn.addEventListener('click', () => applyViewPreset('creases'));
 viewPlanBtn.addEventListener('click', () => applyViewPreset('plan'));
 viewFoldedFormBtn.addEventListener('click', () => applyViewPreset('foldedForm'));
-viewBlueprintBtn.addEventListener('click', () => applyViewPreset('blueprint'));
+// Blueprint has no equivalent in the original TreeMaker: besides switching
+// to the preset above, it also replaces the selection with every facet
+// belonging to an internal edge's corridor (tree.getInternalEdges()) — see
+// NodeEditor.selectInternalCorridorFacets() — so those facets show the
+// usual selection highlight while CanvasRenderer._drawWeldedCorridors()
+// outlines each corridor as one welded polygon on top.
+viewBlueprintBtn.addEventListener('click', () => {
+  applyViewPreset('blueprint');
+  editor.selectInternalCorridorFacets();
+  commitAndRender();
+});
+// Rivers is Blueprint's own "finished" counterpart (see VIEW_PRESETS.rivers)
+// — no facet selection here, since the whole point is a clean, welded
+// river outline rather than Blueprint's per-facet debugging highlight.
+viewRiversBtn.addEventListener('click', () => {
+  applyViewPreset('rivers');
+  editor.clearSelection();
+  commitAndRender();
+});
 
 const BUILD_STATUS_MESSAGE_KEYS = {
   [CPStatus.EDGES_TOO_SHORT]: 'build.msgEdgesTooShort',
@@ -2609,16 +2740,26 @@ editAddLargestStubPolyBtn.addEventListener('click', () => {
 // Position}(): all four real commands operate on the same
 // tmConditionNodeCombo per node, just toggling a different subset of its 5
 // independent flags, which the original lets combine freely. This SPA's UI
-// deliberately makes the four "Fixed to..." toggles mutually exclusive
-// instead (simpler mental model: a node is fixed one way at a time) — so
-// turning one on here always clears X/Y fixing too.
+// mostly keeps the four "Fixed to..." toggles mutually exclusive (simpler
+// mental model: a node is fixed one way at a time) — except Symmetry Line
+// and Paper Edge, which are allowed together: book-symmetry designs
+// routinely need a node fixed to both at once (sitting exactly at the
+// midpoint of whichever paper edge the symmetry line crosses), and the
+// original lets them combine freely for exactly that reason. Paper Corner
+// and Position stay exclusive with everything else — a corner is one
+// specific point, and Position uses an entirely different explicit-value
+// mechanism, so combining either with the other three would be redundant
+// or contradictory.
 function applyNodeFixCombo(sourceCheckbox) {
   const node = editor.selectedNode;
   if (!node || !node.isLeafNode) return;
 
   if (sourceCheckbox?.checked) {
-    for (const checkbox of [nodeFixToSymmetryLineCheckbox, nodeFixToPaperEdgeCheckbox, nodeFixToPaperCornerCheckbox]) {
-      if (checkbox !== sourceCheckbox) checkbox.checked = false;
+    if (sourceCheckbox === nodeFixToPaperCornerCheckbox) {
+      nodeFixToSymmetryLineCheckbox.checked = false;
+      nodeFixToPaperEdgeCheckbox.checked = false;
+    } else {
+      nodeFixToPaperCornerCheckbox.checked = false;
     }
     nodeFixToPositionCheckbox.checked = false;
   }
@@ -2790,15 +2931,20 @@ renderSelFixToPositionLabel();
 // Equivalent to tmwxDoc::OnNodeFixedTo{SymmetryLine,PaperEdge,Corner}():
 // applies immediately on toggle, to every selected leaf node at once
 // (tmTree::SetNodesFixedTo*() loops over the whole leaf list the same
-// way) — same live-apply, mutually-exclusive-with-the-other-three
-// behavior as the single-node inspector's own four toggles, just batched.
+// way) — same live-apply, same exclusivity rules as the single-node
+// inspector's own four toggles (see applyNodeFixCombo()'s comment: Symmetry
+// Line and Paper Edge combine freely, Paper Corner and Position stay
+// exclusive with everything), just batched.
 function applySelectionFixCombo(sourceCheckbox) {
   const leafNodes = getSelectionLeafNodes();
   if (leafNodes.length === 0) return;
 
   if (sourceCheckbox?.checked) {
-    for (const checkbox of [selFixToSymmetryLineCheckbox, selFixToPaperEdgeCheckbox, selFixToPaperCornerCheckbox]) {
-      if (checkbox !== sourceCheckbox) checkbox.checked = false;
+    if (sourceCheckbox === selFixToPaperCornerCheckbox) {
+      selFixToSymmetryLineCheckbox.checked = false;
+      selFixToPaperEdgeCheckbox.checked = false;
+    } else {
+      selFixToPaperCornerCheckbox.checked = false;
     }
     selFixToPositionLast = { xFixed: false, xValue: 0, yFixed: false, yValue: 0 };
     renderSelFixToPositionLabel();
@@ -3863,7 +4009,39 @@ vertexListOverlay.addEventListener('keydown', (e) => {
 // About modal (sidebar's own "About" button, pinned to its bottom edge —
 // see .sidebar-footer in style.css): same open/close pattern as Vertex
 // List above, just without any content to build first.
+// Single source of truth is package.json's "version" (imported above as
+// APP_VERSION) — Vite resolves that JSON import at both dev and build time
+// (regular multi-file build and the offline vite.config.singlefile.js
+// build alike), so the sidebar badge and this modal never drift from
+// what `npm version` last set. Rendered imperatively (not via data-i18n)
+// because applyStaticTranslations() only does a plain textContent swap
+// with no variable interpolation — re-called on 'languagechange' below.
+function renderAppVersion() {
+  appVersionBadge.textContent = `v${APP_VERSION}`;
+  aboutVersion.textContent = t('about.version', { version: APP_VERSION });
+}
+
+// Same "rendered imperatively, not via data-i18n" reasoning as
+// renderAppVersion() above, for a different limitation: applyStaticTranslations()
+// only ever does a plain textContent swap, which would print the <a> tag in
+// about.text as literal text instead of rendering it — this is the only
+// translated string in the app that embeds real markup, since it's the
+// only one that needs an inline link inside otherwise-translated prose
+// (see the conversation this was added from: a link to the langorigami.com
+// article on TreeMaker, inside the existing description sentence). Trusted
+// content — about.text comes from this app's own translations.json, never
+// from user input — so innerHTML here doesn't open any injection risk.
+const GITHUB_URL = 'https://github.com/rod-farias/treemaker-web';
+function renderAboutText() {
+  aboutText.innerHTML = t('about.text');
+  aboutGithubLink.href = GITHUB_URL;
+}
 function openAboutModal() {
+  // A manual open (the sidebar's own "About" button) never shows startup
+  // warnings — those are only ever computed once, by showStartupAbout()
+  // below, right as the page loads.
+  aboutWarningsList.replaceChildren();
+  aboutWarningsList.hidden = true;
   aboutOverlay.style.display = 'flex';
   aboutCloseBtn.focus();
 }
@@ -3875,6 +4053,37 @@ aboutCloseBtn.addEventListener('click', closeAboutModal);
 aboutOverlay.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeAboutModal();
 });
+
+// Shown once, right at startup (see the call near the bottom of this
+// file, after Preferences' bindPersistedCheckbox() calls have restored
+// showStartupWarningsCheckbox's saved state): the app's minimum-size
+// requirements (1300px wide, 550px tall) used to be a persistent on-page
+// red banner; now they're startup warnings inside this same About modal
+// instead, gated behind "Show warnings on startup" (Preferences) so a
+// user who's already seen them can turn the check off entirely. With no
+// warnings to show, the modal is just a friendly splash: it opens and
+// closes itself after 2s, same as if Close had been clicked. With at
+// least one warning, it stays open — no timer — until the user closes it.
+function showStartupAbout() {
+  const warnings = [];
+  if (showStartupWarningsCheckbox.checked) {
+    if (window.innerWidth < 1300) warnings.push(t('app.minWidthWarning'));
+    if (window.innerHeight < 550) warnings.push(t('app.minHeightWarning'));
+  }
+  aboutWarningsList.replaceChildren();
+  for (const message of warnings) {
+    const li = document.createElement('li');
+    li.textContent = message;
+    aboutWarningsList.appendChild(li);
+  }
+  aboutWarningsList.hidden = warnings.length === 0;
+  aboutOverlay.style.display = 'flex';
+  aboutCloseBtn.focus();
+  if (warnings.length === 0) {
+    const timer = setTimeout(closeAboutModal, 2000);
+    aboutCloseBtn.addEventListener('click', () => clearTimeout(timer), { once: true });
+  }
+}
 
 // "Show all labels" (View section): a pure display overlay, independent of
 // the active view preset — see Renderer.js's showAllPartLabels comment —
@@ -4125,6 +4334,8 @@ window.addEventListener('keydown', (event) => {
 
 // Language selector
 initI18n();
+renderAppVersion();
+renderAboutText();
 languageSelect.value = getLanguage();
 languageSelect.addEventListener('change', () => {
   setLanguage(languageSelect.value);
@@ -4132,6 +4343,8 @@ languageSelect.addEventListener('change', () => {
 document.addEventListener('languagechange', () => {
   if (state.lastSolverResult !== undefined) renderSolverStatus(state.lastSolverResult, state.lastSolverError);
   renderScaleLabel();
+  renderAppVersion();
+  renderAboutText();
   commitAndRender();
 });
 
@@ -4145,20 +4358,47 @@ bindPersistedCheckbox(scaleAllowDifferentLayoutCheckbox, 'allowDifferentLayout')
 
 // Color theme (Preferences): swaps the CSS custom properties the sidebar,
 // Inspector and modal windows are all built from (see :root/[data-theme]
-// in style.css) between the default grey-black palette and the "Sky Blue"/
-// "Light Gray" alternatives — the central workspace/canvas is deliberately
+// in style.css) between the default "Dark" palette and the "Sky Blue"/
+// "Light"/"Forest Green" alternatives — the central workspace/canvas is deliberately
 // untouched by any of them. bindPersistedSelect() only restores/persists
 // the <select>'s own value; applying it to the page is this app's own
 // job, same as language. Falls back to 'gray' for anything else (an
 // unrecognized/stale stored value), matching :root's own un-attributed
 // default.
-const COLOR_THEMES = new Set(['gray', 'blue', 'light']);
+const COLOR_THEMES = new Set(['gray', 'blue', 'light', 'green']);
 function applyColorTheme(theme) {
   document.documentElement.dataset.theme = COLOR_THEMES.has(theme) ? theme : 'gray';
 }
 bindPersistedSelect(colorThemeSelect, 'colorTheme');
 applyColorTheme(colorThemeSelect.value);
 colorThemeSelect.addEventListener('change', () => applyColorTheme(colorThemeSelect.value));
+
+// "Auto-collapse sections" (Preferences): when checked, opening one
+// <details class="panel collapsible"> in the sidebar closes every other
+// sibling one, so at most one stays expanded at a time. All those
+// sections are direct children of .sidebar (File, Tree, Scale, Preferences,
+// Reference Finder...); 'toggle' fires on both open and close, so this
+// only reacts to the open case, and only when the checkbox is on — the
+// checkbox itself, and the persisted preference, are otherwise unrelated
+// to any single section's own open/closed state.
+bindPersistedCheckbox(autoCollapseSectionsCheckbox, 'autoCollapseSections');
+
+// "Show warnings on startup" (Preferences): defaults to checked (see the
+// checkbox's own `checked` attribute in index.html — bindPersistedCheckbox()
+// only overrides it once something's actually been stored) — gates
+// showStartupAbout()'s window-size checks below.
+bindPersistedCheckbox(showStartupWarningsCheckbox, 'showStartupWarnings');
+showStartupAbout();
+
+const sidebarSections = [...document.querySelectorAll('.sidebar > details.panel.collapsible')];
+for (const section of sidebarSections) {
+  section.addEventListener('toggle', () => {
+    if (!section.open || !autoCollapseSectionsCheckbox.checked) return;
+    for (const other of sidebarSections) {
+      if (other !== section) other.open = false;
+    }
+  });
+}
 
 // The Tree panel's inputs are never otherwise synced from the tree until
 // some later action does it (undo/redo, load, reset, Apply/Enter) — until

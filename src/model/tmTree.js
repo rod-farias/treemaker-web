@@ -217,6 +217,15 @@ class RootNetwork {
   }
 }
 
+// getWeldedCorridors()'s own polygon-clipping pipeline (_clipConvexInside()/
+// _subtractConvex()/_sliceRingByPolyTree()) drops any piece whose area
+// falls below this — a facet corner sitting exactly on a poly/subPoly
+// boundary line (common in this codebase's geometry) otherwise clips into
+// a sliver of near-zero but nonzero area that would still pass a bare
+// `length >= 3` check, then multiply into more spurious slivers at each
+// further clip down the recursion.
+const CORRIDOR_SLICE_AREA_EPS = 1e-7;
+
 export class tmTree {
   constructor() {
     // Paper dimensions
@@ -345,6 +354,21 @@ export class tmTree {
   // Collection getters
   getNodes() {
     return this.nodes;
+  }
+
+  // Real tree nodes only — excludes the "sub-nodes" (isSubNode: true) a
+  // built crease pattern adds purely as bookkeeping for its own poly/
+  // vertex/crease geometry (see getConnectedComponents()'s comment for how
+  // these come about). The original TreeMaker never shows these on canvas
+  // nor lets them be clicked/selected once a tree is built; every UI-facing
+  // consumer of "all nodes" (canvas drawing/hit-testing, Select All/Select
+  // Nodes and Edges, Select Part by Index) should use this instead of
+  // getNodes() so they match that behavior. Internal consumers that
+  // legitimately need every node regardless of isSubNode (serialization,
+  // connectivity/feasibility checks, crease-pattern algorithms) should keep
+  // using getNodes() directly.
+  getSelectableNodes() {
+    return this.nodes.filter(node => !node.isSubNode);
   }
 
   getEdges() {
@@ -740,11 +764,20 @@ export class tmTree {
     return this;
   }
 
+  // Real tree nodes only — a built crease pattern adds "sub-nodes"
+  // (isSubNode: true) purely as bookkeeping for the poly/vertex/crease
+  // geometry (e.g. one per subdivided path), and those never get an edge
+  // of their own in this.edges: they aren't part of the base tree's
+  // node/edge graph at all. Counting them here would flag every one as
+  // its own disconnected "component" (observed: a 13-node/12-edge tree —
+  // one single connected component — plus 32 edge-less sub-nodes was
+  // reported as "split into 33 disconnected parts", something the
+  // original TreeMaker never flags for the exact same file).
   getConnectedComponents() {
     const components = [];
     const visited = new Set();
     for (const start of this.nodes) {
-      if (visited.has(start)) continue;
+      if (start.isSubNode || visited.has(start)) continue;
       const component = [];
       const queue = [start];
       visited.add(start);
@@ -883,12 +916,24 @@ export class tmTree {
     return this.facets.filter(facet => edgeList.includes(facet.getCorridorEdge()));
   }
 
-  // Internal helper shared by getWeldedCorridors()/getCorridorSegments():
-  // every facet grouped by corridor edge, restricted to internal edges
-  // (both endpoints non-leaf — the same "river" CanvasRenderer.
-  // _drawRivers() draws; a leaf-node edge also gets a corridorEdge from
-  // tmPoly.calcFacetCorridorEdges(), but that strip is the leaf's own
-  // reference circle, not a river).
+  // Every "internal" edge — both endpoints non-leaf nodes — the same
+  // criterion _internalCorridorFacetGroups()/_drawRivers() use to tell a
+  // river (a strip between two branch nodes) apart from a leaf's own
+  // reference-circle strip. Blueprint View's own query: it wants exactly
+  // these edges' corridor facets, not a leaf edge's.
+  getInternalEdges() {
+    return this.edges.filter(edge => {
+      const n1 = edge.getNode(0);
+      const n2 = edge.getNode(1);
+      return n1 && n2 && !n1.isLeafNode && !n2.isLeafNode;
+    });
+  }
+
+  // Internal helper for getWeldedCorridors(): every facet grouped by
+  // corridor edge, restricted to internal edges (both endpoints non-leaf —
+  // the same "river" CanvasRenderer._drawRivers() draws; a leaf-node edge
+  // also gets a corridorEdge from tmPoly.calcFacetCorridorEdges(), but that
+  // strip is the leaf's own reference circle, not a river).
   _internalCorridorFacetGroups() {
     const groups = new Map();
     for (const facet of this.facets) {
@@ -903,160 +948,1041 @@ export class tmTree {
     return groups;
   }
 
-  // Equivalent to nothing in the original — this SPA's own query: every
-  // internal facet-corridor (see _internalCorridorFacetGroups()), welded
-  // into a single outline per corridor. "Welding" needs no new geometry or
-  // boolean library: an edge two of a corridor's own facets share (an
-  // internal seam) is dropped, and only the edges that appear exactly once
-  // (the outer boundary) survive, chained tip-to-tail into one closed
-  // ring. Returns one `{ edge, rings }` per corridor — `rings` is normally
-  // a single-entry array (one clean outline), but stays an array since
-  // nothing here guarantees a corridor's facets can't weld into more than
-  // one loop.
-  getWeldedCorridors() {
-    const groups = this._internalCorridorFacetGroups();
-    return [...groups.entries()].map(([edge, facetGroup]) => ({
-      edge,
-      rings: this._weldFacetGroup(facetGroup)
-    }));
+  // Internal helper for getWeldedCorridors(): `poly`'s true boundary as a
+  // flat, ordered {x,y} ring — unlike poly.vertices (only the ring NODES'
+  // own corner vertices, connected corner-to-corner by an implied straight
+  // line), this walks each ringPaths[i] (the real path from ringNodes[i] to
+  // ringNodes[(i+1) % n] — see the constructor's own comment on those two
+  // fields) and splices in every interior vertex that path picked up during
+  // buildPolyContents() (e.g. where some other element's own boundary
+  // crosses it). A ring edge with no such interior vertices reduces to the
+  // same single corner-to-corner segment as before; one that does bends
+  // through real crease geometry a straight corner-to-corner chord would
+  // cut across.
+  _polyBoundaryRing(poly) {
+    const ring = [];
+    const n = poly.ringNodes.length;
+    for (let i = 0; i < n; i += 1) {
+      const fromNode = poly.ringNodes[i];
+      ring.push(fromNode.getOrMakeVertexSelf());
+      const path = poly.ringPaths[i];
+      if (!path) continue;
+      const forward = path.getFirstNode() === fromNode;
+      const interior = forward ? path.vertices : [...path.vertices].reverse();
+      ring.push(...interior);
+    }
+    return ring.map(v => ({ x: v.getLocX(), y: v.getLocY() }));
   }
 
-  // Every top-level triangle poly — a triangle with no polyOwner poly at
-  // all (this.polys, unlike getAllPolys(), only ever holds top-level
-  // entries), so it's never the direct subPoly a band was carved around:
-  // nothing bands it in.
-  getLooseTrianglePolys() {
-    return this.polys.filter(poly => poly.getVertices().length === 3);
+  // Winds `points` (plain {x,y}) counterclockwise-by-shoelage-sign if it
+  // isn't already — _clipConvexInside()/_clipConvexOutsideOne() below both
+  // assume "left of a directed edge, walking the ring forward" means
+  // inside, which only holds for a consistent winding.
+  _ensureCCW(points) {
+    let area = 0;
+    for (let i = 0; i < points.length; i += 1) {
+      const a = points[i];
+      const b = points[(i + 1) % points.length];
+      area += a.x * b.y - b.x * a.y;
+    }
+    return area < 0 ? [...points].reverse() : points;
   }
 
-  // Internal helper for getCorridorSegments(): every internal corridor's
-  // facets that AREN'T claimed by one of its "inside" pieces (Segment A),
-  // kept as facets (not yet welded) so that method can weld them into its
-  // "outside" kind.
-  _outsideCorridorFacetGroups() {
-    const looseTriangles = this.getLooseTrianglePolys();
-    const groups = this._internalCorridorFacetGroups();
-    const result = new Map();
-    for (const [edge, facetGroup] of groups) {
-      const claimed = new Set();
-      for (const triangle of looseTriangles) {
-        for (const facet of facetGroup) {
-          if (triangle.containsPoint(facet.getCentroid())) claimed.add(facet);
+  // Shoelace area of a ring of either plain {x,y} points or _clipHalfPlane's
+  // own `{ p: {x,y}, cut }` records. Used to drop degenerate slivers a clip
+  // can produce when the shape being clipped already touches the clip
+  // boundary exactly (a facet corner sitting precisely on a poly boundary
+  // line, common in this codebase's geometry) — without this filter, such
+  // a sliver's near-zero but nonzero extent still passes a bare
+  // `length >= 3` check and gets recursed into just like a real piece,
+  // multiplying into more spurious slivers at each further clip.
+  _ringArea(points) {
+    let area = 0;
+    for (let i = 0; i < points.length; i += 1) {
+      const a = points[i].p || points[i];
+      const b = points[(i + 1) % points.length].p || points[(i + 1) % points.length];
+      area += a.x * b.y - b.x * a.y;
+    }
+    return Math.abs(area) / 2;
+  }
+
+  // Sutherland-Hodgman clip of `points` (an array of `{ p: {x,y}, cut }` —
+  // `cut` flags whether the edge arriving AT this point, from the previous
+  // one, lies on some earlier clip's cutting line rather than being part of
+  // the shape being clipped) against the single directed half-plane through
+  // `a` -> `b`, keeping whatever is on `keepLeft`'s side (the left side,
+  // i.e. counterclockwise-inside, when true; the right/outside when
+  // false — same edge, opposite half-plane, which is exactly "outside this
+  // one edge of a CCW convex clip polygon"). A vertex the clip drops or
+  // admits right at the boundary keeps its own `cut` flag when the edge
+  // feeding it survives partly (still real shape boundary, just
+  // shortened); a vertex freshly created where the shape crosses INTO the
+  // kept half-plane instead gets `cut: true`, since the segment leading to
+  // it — from wherever the shape last touched this same boundary — is the
+  // clip line itself, not anything that was ever part of the original
+  // shape.
+  _clipHalfPlane(points, a, b, keepLeft) {
+    const side = (p) => {
+      const c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+      return keepLeft ? c : -c;
+    };
+    const intersect = (p1, p2) => {
+      const c1 = side(p1);
+      const c2 = side(p2);
+      const t = c1 / (c1 - c2);
+      return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+    };
+    const out = [];
+    const n = points.length;
+    for (let i = 0; i < n; i += 1) {
+      const cur = points[i];
+      const prev = points[(i - 1 + n) % n];
+      const curIn = side(cur.p) >= -1e-9;
+      const prevIn = side(prev.p) >= -1e-9;
+      if (curIn) {
+        if (!prevIn) out.push({ p: intersect(prev.p, cur.p), cut: true });
+        out.push({ p: cur.p, cut: cur.cut });
+      } else if (prevIn) {
+        out.push({ p: intersect(prev.p, cur.p), cut: cur.cut });
+      }
+    }
+    return out;
+  }
+
+  // Intersection of `points` with the convex polygon `clipRing` (a plain
+  // {x,y} ring — see _polyBoundaryRing()) — sequential Sutherland-Hodgman
+  // clipping against each of the clip polygon's own edges.
+  _clipConvexInside(points, clipRing) {
+    const ring = this._ensureCCW(clipRing);
+    let result = points;
+    for (let i = 0; i < ring.length && result.length > 0; i += 1) {
+      result = this._clipHalfPlane(result, ring[i], ring[(i + 1) % ring.length], true);
+    }
+    return result.length >= 3 && this._ringArea(result) > CORRIDOR_SLICE_AREA_EPS ? result : [];
+  }
+
+  // `points` minus the convex polygon `clipRing`, as an array of disjoint
+  // convex pieces — one per edge of `clipRing`, each the part of `points`
+  // outside that specific edge but still inside every edge before it (in
+  // ring order). That per-edge decomposition is the standard trick for
+  // subtracting one convex region from anything: instead of one possibly-
+  // concave leftover polygon (which plain half-plane clipping can't
+  // produce directly), it's split into these convex wedges, each of which
+  // half-plane clipping already handles exactly.
+  _subtractConvex(points, clipRing) {
+    const ring = this._ensureCCW(clipRing);
+    const pieces = [];
+    for (let i = 0; i < ring.length; i += 1) {
+      const a = ring[i];
+      const b = ring[(i + 1) % ring.length];
+      // "Outside edge i" = inside the same edge reversed (b -> a) — for a
+      // CCW ring, reversing a directed edge flips which side counts as
+      // "left".
+      let piece = this._clipHalfPlane(points, b, a, true);
+      for (let k = 0; k < i && piece.length > 0; k += 1) {
+        piece = this._clipHalfPlane(piece, ring[k], ring[(k + 1) % ring.length], true);
+      }
+      if (piece.length >= 3 && this._ringArea(piece) > CORRIDOR_SLICE_AREA_EPS) pieces.push(piece);
+    }
+    return pieces;
+  }
+
+  // Collapses consecutive near-duplicate points (within RING_POINT_MERGE_EPS)
+  // a clip can leave behind when a freshly-cut intersection point lands
+  // right on top of a vertex the shape already had there (common — see
+  // CORRIDOR_SLICE_AREA_EPS's own comment on boundary-touching geometry),
+  // including the closing wrap from the last point back to the first. The
+  // tolerance is well above float noise (a single algebraic intersection
+  // lands within ~1e-9 of an exact repeat) because the same near-duplicate
+  // also shows up already a short distance apart — two DIFFERENT clips
+  // (e.g. adjacent sibling polys sharing an edge) intersecting the ring
+  // independently within a few ten-thousandths of the same real corner —
+  // and both cases need collapsing the same way for a clean cut count.
+  // Kept separate from the area-based filtering above, which drops whole
+  // degenerate PIECES — this only tidies a real piece's own point list, so
+  // _sliceRingByPolyTree()'s cut-edge bookkeeping never double-counts one
+  // real crossing as an extra, near-zero-length "cut" segment alongside it.
+  // Whichever of a merged pair is the genuine crossing (`cut: true`) always
+  // wins the surviving point's own position — the other was only ever a
+  // natural vertex that happened to land beside it, not a separate corner
+  // worth keeping.
+  _dedupeRingPoints(points) {
+    const tol = 1e-3;
+    const same = (p, q) => Math.abs(p.x - q.x) < tol && Math.abs(p.y - q.y) < tol;
+    const out = [];
+    for (const pt of points) {
+      const last = out[out.length - 1];
+      if (last && same(last.p, pt.p)) {
+        if (pt.cut && !last.cut) out[out.length - 1] = pt;
+        continue;
+      }
+      out.push(pt);
+    }
+    if (out.length > 1 && same(out[0].p, out[out.length - 1].p)) {
+      const wrapped = out.pop();
+      if (wrapped.cut && !out[0].cut) out[0] = wrapped;
+    }
+    return out;
+  }
+
+  // Internal helper for _isNotchOnly(): the perpendicular distance from `p`
+  // to the finite segment a->b (not the infinite line — a point past
+  // either endpoint measures to that endpoint instead).
+  _pointSegmentDistance(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-18) return Math.hypot(p.x - a.x, p.y - a.y);
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  // Internal helper for getWeldedCorridors(): tags every edge of a facet
+  // group's welded `ring` (an array of tmVertex, as _weldFacetGroup()
+  // returns it) with which of the corridor's two long sides it belongs to
+  // — 'A' or 'B' — using the facet chain's own adjacency, not geometry, so
+  // it doesn't care how many small facet-to-facet edges make up a side or
+  // how sharply the river bends partway along it. A facet in the middle of
+  // a linear corridor chain shares one edge with the facet before it and
+  // one with the facet after it (dropped from the ring as internal seams —
+  // see _weldFacetGroup()); its own two remaining (lone) edges are exactly
+  // one per side, always on OPPOSITE sides of the strip. Walking the chain
+  // from one end assigns each facet a position 0..N-1; walking the welded
+  // ring itself then traces that position value up from 0 to its peak (one
+  // side, in whichever direction the ring happens to run) and back down to
+  // 0 (the other side) — a single up-then-down "tent" over the ring's own
+  // cyclic order — so splitting the ring at its one peak and one trough
+  // gives exactly the two long sides.
+  //
+  // Also returns `endAnchors`: every ring vertex that borders the chain's
+  // lowest- or highest-index facet(s) — i.e. sits right at one of the
+  // corridor's own two ends (a leaf, a hub, or wherever else the chain
+  // simply stops). Right at an end, the strip's own width closes down to
+  // that end's own cap, so the two ring vertices flanking it end up on
+  // OPPOSITE sides by the walk above even when they're only ever a single
+  // small end facet apart — see _isNotchOnly()'s own use of these.
+  _ringEdgeSides(facetGroup, ring) {
+    const edgeFacets = new Map();
+    for (const facet of facetGroup) {
+      const verts = facet.getVertices();
+      for (let i = 0; i < verts.length; i += 1) {
+        const a = verts[i];
+        const b = verts[(i + 1) % verts.length];
+        const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+        if (!edgeFacets.has(key)) edgeFacets.set(key, []);
+        edgeFacets.get(key).push(facet);
+      }
+    }
+    const adjacency = new Map(facetGroup.map(f => [f, new Set()]));
+    for (const facets of edgeFacets.values()) {
+      if (facets.length === 2) {
+        adjacency.get(facets[0]).add(facets[1]);
+        adjacency.get(facets[1]).add(facets[0]);
+      }
+    }
+    const chainIndex = new Map();
+    let cur = facetGroup.find(f => adjacency.get(f).size <= 1) || facetGroup[0];
+    let prev = null;
+    let idx = 0;
+    while (cur && !chainIndex.has(cur)) {
+      chainIndex.set(cur, idx);
+      idx += 1;
+      const next = [...adjacency.get(cur)].find(f => f !== prev && !chainIndex.has(f));
+      prev = cur;
+      cur = next;
+    }
+
+    const n = ring.length;
+    const vals = new Array(n);
+    for (let i = 0; i < n; i += 1) {
+      const a = ring[i];
+      const b = ring[(i + 1) % n];
+      const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+      const facet = (edgeFacets.get(key) || [])[0];
+      vals[i] = chainIndex.get(facet) ?? 0;
+    }
+    let peakIdx = 0;
+    let troughIdx = 0;
+    for (let i = 1; i < n; i += 1) {
+      if (vals[i] > vals[peakIdx]) peakIdx = i;
+      if (vals[i] < vals[troughIdx]) troughIdx = i;
+    }
+    // The facet chain can genuinely branch (a facet bordering 3+ others
+    // within its own group — observed at a symmetric multi-river junction,
+    // where one internal edge's own corridor facets meet more than one
+    // neighbor apiece): the walk above then only ever follows ONE branch,
+    // silently skipping the rest, and the resulting `vals` sequence isn't
+    // the clean single "tent" the peak/trough logic assumes. `endAnchors`
+    // relies on that assumption (see _isNotchOnly()); rather than let a
+    // corrupted peak/trough manufacture false "this is a corridor end"
+    // matches, leave it empty whenever the walk didn't reach every facet —
+    // the plain side split below still degrades reasonably even then.
+    const endAnchors = [];
+    if (chainIndex.size === facetGroup.length) {
+      for (let i = 0; i < n; i += 1) {
+        if (vals[i] === vals[peakIdx] || vals[i] === vals[troughIdx]) {
+          endAnchors.push({ x: ring[i].getLocX(), y: ring[i].getLocY() });
+          endAnchors.push({ x: ring[(i + 1) % n].getLocX(), y: ring[(i + 1) % n].getLocY() });
         }
       }
-      result.set(edge, facetGroup.filter(f => !claimed.has(f)));
+    }
+    const sides = new Array(n).fill('B');
+    if (vals[peakIdx] === vals[troughIdx]) return { sides: sides.fill('A'), endAnchors };
+    for (let i = troughIdx; ; i = (i + 1) % n) {
+      sides[i] = 'A';
+      if (i === peakIdx) break;
+    }
+    return { sides, endAnchors };
+  }
+
+  // Internal helper for _sliceRingByPolyTree(): true when a poly/subPoly's
+  // own territory (`inside`, already clipped out of the corridor's current
+  // material) only notches the material rather than cutting all the way
+  // through it, dividing it into two separate parts — the geometric test
+  // the user asked for directly: does the candidate's own cut cross both of
+  // the corridor's long sides, or just nibble into one of them?
+  //
+  // `inside`'s own two crossing points — where the material's boundary
+  // passes into and back out of the poly — can't just be read off
+  // `_clipHalfPlane()`'s `cut: true` flag: that flag only marks a point
+  // freshly CREATED by an intersection, but a crossing can just as well
+  // land exactly on an existing corridor-ring vertex (common right at a
+  // branch hub, where several creases meet at one point), keeping its old
+  // `cut: false` despite being just as real a crossing. Nor is "lies
+  // somewhere on clipRing's own boundary" enough either: a poly can have an
+  // edge that runs right along the corridor's own outline for a whole
+  // stretch (e.g. both following the same paper edge), which any number of
+  // `inside` points can sit on without a fresh cut happening there at all.
+  // What actually marks a crossing is a change in EDGE KIND while walking
+  // `inside`'s own boundary: each of its edges is either a piece of the
+  // corridor's original outline (`originalEdges`) or a piece of `clipRing`
+  // (introduced by this clip) — classified by testing each edge's OWN
+  // midpoint, which (unlike an endpoint) can't be mistaken for the other
+  // kind by sitting exactly on a shared vertex. A vertex where the edge
+  // before it and the edge after it differ in kind is a crossing.
+  //
+  // The two crossings found this way are matched against `originalEdges`
+  // (`{ a, b, side }`, from _ringEdgeSides() — the corridor's OWN welded
+  // outline, captured once before any slicing):
+  //   - Both crossings land on the SAME side ('A'/'A' or 'B'/'B'), however
+  //     many small facet-to-facet edges apart along it: the candidate's cut
+  //     leaves and re-enters through that one physical side — a notch.
+  //   - Landing on different sides normally means a genuine full division —
+  //     EXCEPT when BOTH crossings themselves sit at one of `endAnchors`
+  //     (from _ringEdgeSides() — the vertices flanking the corridor's own
+  //     two ends). Right at an end the strip's width closes down to that
+  //     end's own cap, so the two flanking vertices land on opposite sides
+  //     by construction even when the material between them is just that
+  //     end's own tip, not a real cross-section — trimming a tip doesn't
+  //     divide the corridor into two continuing parts, so it's a notch too.
+  //     `inside` can legitimately CONTAIN end-anchor points elsewhere in
+  //     its own boundary too (a poly big enough to also swallow a whole end
+  //     while genuinely cutting across to a distant, unrelated part of the
+  //     ring) without either of that being a tip trim — only the crossings
+  //     THEMSELVES landing there marks this specific cut as one.
+  //   - Either crossing landing on no original edge at all — it lands
+  //     instead on a boundary some earlier, already-accepted division left
+  //     behind — can't be confirmed as spanning the strip's own two sides
+  //     at all: the SAME leftover division-boundary vertex commonly borders
+  //     more than one residual piece at once (observed: two different
+  //     leftover fragments, on either side of an earlier real cut, each
+  //     still touching that cut's own endpoint), so a small poly nibbling
+  //     one such fragment from its one remaining original side can share
+  //     that vertex with a twin nibble on the OTHER fragment without either
+  //     one actually crossing the corridor at all — treated as a notch,
+  //     the same as two same-side crossings, rather than assumed to be a
+  //     genuine division without evidence either way.
+  // Anything other than exactly two crossings (0 — the poly swallows this
+  // material whole; 4+ — a shape too irregular for this simple test) is let
+  // through unfiltered rather than guessed at.
+  _isNotchOnly(inside, originalEdges, clipRing, endAnchors) {
+    const tol = 1e-6;
+    const onOriginal = (p) => originalEdges.some(e => this._pointSegmentDistance(p, e.a, e.b) < tol);
+    const onClip = (p) => clipRing.some((a, i) => this._pointSegmentDistance(p, a, clipRing[(i + 1) % clipRing.length]) < tol);
+
+    const n = inside.length;
+    const edgeIsClip = new Array(n);
+    for (let i = 0; i < n; i += 1) {
+      const a = inside[i].p;
+      const b = inside[(i + 1) % n].p;
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      edgeIsClip[i] = onClip(mid) && !onOriginal(mid);
+    }
+    const crossPoints = [];
+    for (let i = 0; i < n; i += 1) {
+      if (edgeIsClip[(i - 1 + n) % n] !== edgeIsClip[i]) crossPoints.push(inside[i].p);
+    }
+    if (crossPoints.length !== 2) return false;
+
+    // The vertex exactly AT one of the corridor's own ends (an endAnchor) is
+    // the seam between its 'A' run and its 'B' run — genuinely part of
+    // both, not whichever one a plain edge scan happens to hit first (the
+    // first-listed originalEdge touching it, always the same one, would
+    // otherwise silently win every time). A crossing landing exactly there
+    // can't be pinned to a side at all, so it's treated the same as landing
+    // on no original edge — unknown, hence a notch (see the null case
+    // below): right at the corridor's own tip, only a SEPARATE, unambiguous
+    // crossing elsewhere is good evidence of a genuine cross-strip division.
+    const nearAnchor = (p) => !!endAnchors && endAnchors.some(a => Math.hypot(p.x - a.x, p.y - a.y) < tol);
+    const sideFor = (p) => {
+      if (nearAnchor(p)) return null;
+      for (const e of originalEdges) {
+        if (this._pointSegmentDistance(p, e.a, e.b) < tol) return e.side;
+      }
+      return null;
+    };
+    const s1 = sideFor(crossPoints[0]);
+    const s2 = sideFor(crossPoints[1]);
+    if (s1 === null || s2 === null) return true;
+    if (s1 === s2) return true;
+    return false;
+  }
+
+  // Recursion step for getWeldedCorridors(): distributes one corridor
+  // ring/piece (`points`, in the same `{ p, cut }` shape _clipHalfPlane()
+  // uses) across `siblings` (one "generation" of sibling polys/subPolys —
+  // initially this.polys, then, going inward, some poly's own subPolys),
+  // clipping it against each sibling in turn. A sibling that only notches
+  // the material (see _isNotchOnly() — `originalEdges` is the corridor's
+  // own whole welded outline, captured once before any slicing and
+  // threaded through unchanged all the way down the recursion) isn't used
+  // as a cutting boundary at all: skip it and move on to the next sibling
+  // with `points` untouched, as if it had never been tested. Otherwise,
+  // whatever ends up inside a sibling recurses into THAT sibling's own
+  // subPolys (or, once there are none left, is reported as a finished leaf
+  // slice); whatever never lands inside any sibling belongs to
+  // `parentPoly` itself (the region those siblings carve their own
+  // territory out of, minus all of it — null only at the very top, for a
+  // piece outside every top-level poly). A sibling that actually divides
+  // the material can leave more than one disjoint leftover piece behind
+  // (see _subtractConvex()) — each is tested against the remaining
+  // siblings independently rather than merged back into one, since a non-
+  // convex leftover can't always be represented as a single ring.
+  //
+  // A sibling with NO overlap at all (`inside` empty) is skipped the same
+  // way, WITHOUT ever calling _subtractConvex(): subtracting nothing from
+  // `points` can only ever be a no-op in exact arithmetic, but its own per-
+  // edge decomposition (see _subtractConvex()'s comment) is really only
+  // exercised meaningfully when the two shapes truly overlap — right at
+  // this degenerate zero-overlap case it can still hand back more than one
+  // piece purely from floating-point noise in nearly-symmetric geometry
+  // (observed: a design's own two mirror-image halves, computed indepen-
+  // dently by the solver to within a few millionths of a unit rather than
+  // bit-for-bit, take a poly that plainly doesn't touch the material on
+  // ONE side and spuriously "split" it there while leaving it alone on the
+  // other). That spurious split then cascades into every poly tested
+  // beneath it, since the two mirror halves are now recursing over
+  // genuinely different `points` shapes rather than merely reaching the
+  // same result by different paths — no downstream fix (welding leaves
+  // back together, tie-breaking a single notch decision) can undo a
+  // divergence this early. Skipping the call entirely whenever there is no
+  // real material to subtract removes the chance for it.
+  _sliceRingByPolyTree(points, siblings, parentPoly, pushLeaf, originalEdges, endAnchors) {
+    for (let s = 0; s < siblings.length; s += 1) {
+      if (points.length < 3) return;
+      const poly = siblings[s];
+      const clipRing = this._polyBoundaryRing(poly);
+      const inside = this._clipConvexInside(points, clipRing);
+
+      if (this._isNotchOnly(inside, originalEdges, clipRing, endAnchors)) continue;
+      if (inside.length < 3) continue;
+
+      if (poly.subPolys.length > 0) {
+        this._sliceRingByPolyTree(inside, poly.subPolys, poly, pushLeaf, originalEdges, endAnchors);
+      } else {
+        pushLeaf(poly, inside);
+      }
+
+      const outsidePieces = this._subtractConvex(points, clipRing);
+      if (outsidePieces.length <= 1) {
+        points = outsidePieces[0] || [];
+      } else {
+        const restSiblings = siblings.slice(s + 1);
+        for (const piece of outsidePieces) this._sliceRingByPolyTree(piece, restSiblings, parentPoly, pushLeaf, originalEdges, endAnchors);
+        return;
+      }
+    }
+    if (points.length >= 3) pushLeaf(parentPoly, points);
+  }
+
+  // Equivalent to nothing in the original — this SPA's own query: every
+  // internal facet-corridor (see _internalCorridorFacetGroups()), welded
+  // into its own outline ("welding" needs no new geometry or boolean
+  // library: an edge two of the group's own facets share — an internal
+  // seam — is dropped, and only the edges that appear exactly once survive,
+  // chained tip-to-tail), then cut into slices wherever that outline
+  // crosses a poly/subPoly boundary that cuts all the way through it (see
+  // _sliceRingByPolyTree() and its own _isNotchOnly() check) — a
+  // poly/subPoly that only notches the corridor from one side, without
+  // separating it into two, isn't used as a cutting boundary at all. That
+  // cut DOES need real polygon clipping, unlike the welding step — a
+  // poly/subPoly boundary is built from real creases in the same planar
+  // crease network the facets come from, but nothing guarantees it only
+  // ever crosses the welded outline at an existing facet-to-facet seam;
+  // it can run straight through a single facet's own interior (observed:
+  // a facet quad with two corners inside a subPoly and two outside it,
+  // with no facet edge anywhere near the subPoly's own boundary line),
+  // which plain facet-by-facet classification can't represent at all.
+  //
+  // Each resulting slice's own boundary edges split into two kinds: a
+  // "natural" edge was already part of the whole welded outline before any
+  // slicing (the river's own long side); a "cut" edge is one
+  // _sliceRingByPolyTree()'s clipping introduced, lying exactly on some
+  // poly/subPoly's boundary line. A slice bounded by exactly two cut edges
+  // is the "<"-shaped middle piece of a river cut on both ends (its two
+  // cut edges are necessarily the same length, both being cross-cuts of
+  // the same constant-width strip) — `crossing` is the point (possibly off
+  // the paper) where those two cut edges' carrier lines, extended, would
+  // meet; null when there aren't exactly two, or when they happen to run
+  // parallel.
+  //
+  // Returns a flat list of `{ edge, poly, rings, cutSegments, crossing }`
+  // — one entry per (corridor, region) slice. `poly` is the region
+  // (possibly null, for a piece outside every top-level poly) that slice
+  // came from. `rings` is a single-entry array of plain {x,y} points (not
+  // tmVertex — real clipping can introduce points that aren't any existing
+  // vertex), kept as an array only for shape-parity with other rendering
+  // data this SPA produces.
+  getWeldedCorridors() {
+    const groups = this._internalCorridorFacetGroups();
+    const result = [];
+    for (const [edge, facetGroup] of groups) {
+      for (const ring of this._weldFacetGroup(facetGroup)) {
+        if (ring.length < 3) continue;
+        const points = ring.map(v => ({ p: { x: v.getLocX(), y: v.getLocY() }, cut: false }));
+        const { sides: ringSides, endAnchors } = this._ringEdgeSides(facetGroup, ring);
+        const originalEdges = points.map((pt, i) => ({
+          a: pt.p,
+          b: points[(i + 1) % points.length].p,
+          side: ringSides[i]
+        }));
+
+        // _sliceRingByPolyTree() can (see its own comment on
+        // _subtractConvex()'s multi-piece leftovers) hand the SAME poly
+        // more than one separate leaf piece for what is, geometrically,
+        // one single convex region's worth of material — an artifact of
+        // which edge of which sibling poly the recursion happened to
+        // clip against first, not a real seam in the design (observably:
+        // a mirror-symmetric design's two mirrored halves can come out
+        // needing a different number of leaves for what's the same
+        // shape, reflected). Collecting every leaf for this whole ring
+        // first, then re-welding whichever ones share the same `poly`
+        // back into one another wherever they still share an edge (same
+        // technique as _weldFacetGroup(), just matching by coordinate
+        // instead of shared tmVertex identity, since these pieces don't
+        // share actual vertex objects), removes that seam again before
+        // it can affect cut/bend detection below.
+        const leaves = [];
+        this._sliceRingByPolyTree(points, this.polys, null, (poly, rawSlicePoints) => {
+          const slicePoints = this._dedupeRingPoints(rawSlicePoints);
+          if (slicePoints.length >= 3) leaves.push({ poly, slicePoints });
+        }, originalEdges, endAnchors);
+        const byPoly = new Map();
+        for (const { poly, slicePoints } of leaves) {
+          if (!byPoly.has(poly)) byPoly.set(poly, []);
+          byPoly.get(poly).push(slicePoints);
+        }
+
+        for (const [poly, pieces] of byPoly) {
+          const mergedRings = pieces.length === 1 ? pieces : this._weldPointRings(pieces);
+          for (const slicePoints of mergedRings) {
+            if (slicePoints.length < 3) continue;
+            // `ringCuts[i]` mirrors slicePoints[i].cut: true when the ring
+            // edge ARRIVING at ring point i (from i-1) lies on some poly's
+            // cutting boundary rather than the corridor's own natural
+            // outline — i.e. it's the seam where this slice touches its
+            // neighbor on the other side of that cut. Rivers view (see
+            // CanvasRenderer._drawWeldedCorridors()'s `weldedRivers` mode)
+            // uses this to weld same-edge slices into one river visually:
+            // stroke only the natural edges, never a cut/seam edge.
+            //
+            // cutSegments/crossing/bends aren't computed yet here — they're
+            // filled in below, in a second pass over the whole `result`
+            // array, AFTER the cross-ring confirmation pass just below
+            // finishes downgrading whichever of these raw cut flags turn
+            // out to be unconfirmed (see that pass's own comment). Building
+            // cutSegments from the raw, still-unconfirmed flags would count
+            // an unconfirmed cut as a real, independent side of the sector
+            // right alongside the genuine ones — inflating a ring with 2
+            // real cuts (which _drawCutSector() could round into a proper
+            // sector) into one that looks like it has 3+, none of which
+            // ever gets rounded at all (seen on a real design: an unconfirmed
+            // stray cut sitting between two confirmed ones on the SAME side
+            // split what should have been one matching-radius pair into two
+            // separate single-edge runs, neither able to pair with the
+            // other — test/prueba24.tmd5 edge 7's corridor).
+            const ringPoints = slicePoints.map(x => x.p);
+            const ringCuts = slicePoints.map(x => !!x.cut);
+            // `rawCuts` is a snapshot taken before the confirmation pass
+            // below can downgrade `ringCuts` in place — _buildCutSegments-
+            // AndCrossing() needs both: raw for a ring with a single cut
+            // (see its own comment on why that one must NEVER go through
+            // confirmation — a paper-boundary partner never gets a
+            // matching sibling to confirm against, by construction) and
+            // confirmed for a ring with 3+ raw cuts, where confirmation is
+            // what tells an unconfirmed, spurious extra cut apart from the
+            // two genuine ones.
+            result.push({ edge, poly, rings: [ringPoints], ringCuts: [ringCuts], rawCuts: ringCuts.slice() });
+          }
+        }
+      }
+    }
+    // A genuine cut (the seam between two slices of the same river, split
+    // apart by some poly's own boundary) always tags BOTH slices' own copy
+    // of that shared edge — one on either side of it — since each side's
+    // classification comes from the SAME clip line. An edge `cut` on only
+    // one side is instead the occasional case where a ring vertex lands
+    // exactly on an unrelated poly's own boundary (see _clipHalfPlane()'s
+    // own near-miss handling) and gets mistaken for a fresh crossing there,
+    // rather than a real division — downgrading this ring's OWN copy of
+    // that edge back to natural here, BEFORE cutSegments/crossing are ever
+    // built from it below, keeps an unconfirmed one-sided "crossing" from
+    // ever reaching _buildCutSegmentsAndCrossing() as if it were as real as
+    // a confirmed one.
+    const keyOf = (p) => `${p.x.toFixed(6)},${p.y.toFixed(6)}`;
+    const byEdge = new Map();
+    for (const r of result) {
+      if (!byEdge.has(r.edge)) byEdge.set(r.edge, []);
+      byEdge.get(r.edge).push(r);
+    }
+    for (const group of byEdge.values()) {
+      const counts = new Map();
+      for (const r of group) {
+        const ring = r.rings[0];
+        const cuts = r.ringCuts[0];
+        const n = ring.length;
+        for (let i = 0; i < n; i += 1) {
+          if (!cuts[i]) continue;
+          const ka = keyOf(ring[(i - 1 + n) % n]);
+          const kb = keyOf(ring[i]);
+          const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      }
+      for (const r of group) {
+        const ring = r.rings[0];
+        const cuts = r.ringCuts[0];
+        const n = ring.length;
+        for (let i = 0; i < n; i += 1) {
+          if (!cuts[i]) continue;
+          const ka = keyOf(ring[(i - 1 + n) % n]);
+          const kb = keyOf(ring[i]);
+          const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+          if ((counts.get(key) || 0) < 2) cuts[i] = false;
+        }
+      }
+    }
+    // Only now, with every ring's own `ringCuts` confirmed (unconfirmed
+    // one-sided "crossings" already downgraded to false above), is it safe
+    // to build each ring's cutSegments/crossing/bends from the confirmed
+    // set — see _buildCutSegmentsAndCrossing()'s own comment for why it
+    // still needs `rawCuts` alongside this confirmed `ringCuts`, rather
+    // than confirmed alone.
+    for (const r of result) {
+      const { cutSegments, crossing } = this._buildCutSegmentsAndCrossing(r.rings[0], r.rawCuts, r.ringCuts[0]);
+      r.cutSegments = cutSegments;
+      r.crossing = crossing;
+      r.bends = this._findBendVertices(r.rings[0]);
+      delete r.rawCuts;
     }
     return result;
   }
 
-  // Equivalent to nothing in the original — this SPA's own query: cuts
-  // every internal facet-corridor (see getWeldedCorridors()) into segments
-  // wherever a loose triangle (see getLooseTrianglePolys()) overlaps it.
-  // A loose triangle's own boundary is built from real creases in the same
-  // planar crease network the facets come from, so no facet ever straddles
-  // it — splitting a corridor's facet group by "which loose triangle (if
-  // any) contains this facet's centroid" is exact, no polygon-clipping
-  // library needed (tmPoly.containsPoint() is already point-in-polygon via
-  // ray casting). Each corridor becomes one segment per loose triangle it
-  // overlaps (that triangle's slice — "Segment A") plus one "outside"
-  // segment for whatever's left uncut — these segments replace the
-  // corridor as a whole. Returns a flat list of
-  // `{ edge, kind: 'inside' | 'outside', triangle, rings }`.
-  getCorridorSegments() {
-    const looseTriangles = this.getLooseTrianglePolys();
-    const groups = this._internalCorridorFacetGroups();
-    const segments = [];
-
-    for (const [edge, facetGroup] of groups) {
-      for (const triangle of looseTriangles) {
-        const insideFacets = facetGroup.filter(f => triangle.containsPoint(f.getCentroid()));
-        if (insideFacets.length === 0) continue;
-        segments.push({ edge, kind: 'inside', triangle, rings: this._weldFacetGroup(insideFacets) });
+  // Internal helper for _buildCutSegmentsAndCrossing(): from `ringPoints`
+  // (plain {x,y}, in ring order) and `cuts` (a bool per point, true when
+  // the edge ARRIVING at that same index is a cut), builds `cutSegments` —
+  // one entry per contiguous run of cut edges, each the ordered polyline of
+  // every point it actually passes through, not just its own two outer
+  // ends. A cutting poly with more than one edge crossing the ring (a
+  // quadrilateral or bigger, rather than the usual triangle) can make the
+  // boundary cross two of ITS OWN edges in a row, meeting at one of the
+  // poly's own corners instead of at a natural ring vertex: two separate
+  // `cut`-tagged points back to back, still one side of the eventual
+  // sector, not two, but with a real corner partway along it that
+  // _drawCutSector() has to actually draw — collapsing it away into a
+  // straight chord between the two outer ends would cut across real
+  // material on one side of that corner and leave a gap on the other,
+  // mismatching whatever this same cut's other side already draws there.
+  //
+  // The point immediately BEFORE a run starts is only sometimes part of
+  // that same side: when the run is a single crossing, the point before it
+  // is the only other point available to anchor the cut's own carrier
+  // line, and in practice it sits exactly on that line too (this whole
+  // side is a single straight cut edge, and every point of it, including
+  // where it starts, lies on the cutting poly's own boundary). But when a
+  // run has TWO OR MORE crossings already (a real corner of the cutting
+  // poly, as above), those crossings alone already fix the line for each
+  // of the run's own segments — the point before the run is then typically
+  // just some OTHER, unrelated natural vertex of the corridor's own
+  // material that merely happens to sit inside the cutting poly (not on
+  // its boundary) before the boundary ever reaches it, since a run this
+  // long only starts once the material has already been travelling
+  // through the cutting poly's own interior for a stretch — including it
+  // would draw a stray extra edge with no matching counterpart on the
+  // neighboring slice. Collinearity with the run's own first segment tells
+  // them apart.
+  _buildCutRuns(ringPoints, cuts) {
+    const cutSegments = [];
+    const n = ringPoints.length;
+    const lineTol = 1e-3;
+    const onLine = (p, a, b) => {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-9) return false;
+      return Math.abs((p.x - a.x) * dy - (p.y - a.y) * dx) / len < lineTol;
+    };
+    for (let i = 0; i < n; i += 1) {
+      const prevIdx = (i - 1 + n) % n;
+      if (cuts[i] && !cuts[prevIdx]) {
+        const prevPoint = ringPoints[prevIdx];
+        const run = [];
+        let j = i;
+        while (true) {
+          run.push(ringPoints[j]);
+          const nextIdx = (j + 1) % n;
+          if (!cuts[nextIdx]) break;
+          j = nextIdx;
+        }
+        const includePrev = run.length === 1 || onLine(prevPoint, run[0], run[1]);
+        cutSegments.push(includePrev ? [prevPoint, ...run] : run);
       }
     }
-    for (const [edge, outsideFacets] of this._outsideCorridorFacetGroups()) {
-      if (outsideFacets.length === 0) continue;
-      segments.push({ edge, kind: 'outside', triangle: null, rings: this._weldFacetGroup(outsideFacets) });
-    }
-    return segments;
+    return cutSegments;
   }
 
-  // Every non-triangle poly among `siblings`' own direct subPolys, with
-  // duplicates collapsed — the next inward "generation" _walkPolygonLevel()
-  // recurses into as one combined group (see that method's own comment for
-  // why siblings — e.g. poly3 and poly5, both direct subPolys of poly2 —
-  // have to be unioned together rather than tested one at a time).
-  _nextPolygonSiblings(siblings) {
-    return [...new Set(siblings.flatMap(poly => poly.subPolys.filter(sp => sp.getVertices().length !== 3)))];
+  // Internal helper for getWeldedCorridors(): from `ringPoints` (plain
+  // {x,y}, in ring order), `rawCuts` (true when the edge ARRIVING at that
+  // same index was ever flagged as a cut during slicing) and `confirmedCuts`
+  // (the same, narrowed by getWeldedCorridors()'s own cross-ring-matching
+  // pass to just the cuts some sibling ring also flags at the identical
+  // edge), builds `cutSegments` and, if there end up being exactly two,
+  // `crossing` — the point their carrier lines converge at, but only when
+  // that convergence is a genuine "constant width on both sides" apex (see
+  // _isMatchingRadiusPair()), never just wherever two non-parallel lines
+  // happen to meet.
+  //
+  // `rawCuts` drives everything by default — a single raw cut (see the
+  // partner-search below) is exactly the case confirmation can NEVER
+  // validate, since its other side is the paper's own edge, which is never
+  // itself flagged `cut` and so never gives a matching sibling to confirm
+  // against; trusting confirmed-only there would silently drop the one
+  // real cut a legitimate river end-cap has, losing its whole sector. Only
+  // when raw building already finds 3 or more separate runs — a shape no
+  // existing rule here handles — is `confirmedCuts` tried instead, on the
+  // chance the spurious extra run(s) are exactly what confirmation catches
+  // and dropping them reveals the real 2-cut pair underneath (seen on a
+  // real design: test/prueba24.tmd5 edge 7's corridor, where one of three
+  // raw runs was a stray, one-sided crossing with no matching sibling
+  // anywhere, splitting what should have been one matching-radius pair
+  // into two separate single-edge runs, neither able to pair with the
+  // other). If confirmation doesn't resolve to exactly 2, the raw build is
+  // kept — better an unrounded polygon than silently discarding real cuts
+  // on a shape this rule was never designed for.
+  _buildCutSegmentsAndCrossing(ringPoints, rawCuts, confirmedCuts) {
+    let cutSegments = this._buildCutRuns(ringPoints, rawCuts);
+    if (cutSegments.length >= 3) {
+      const confirmedSegments = this._buildCutRuns(ringPoints, confirmedCuts);
+      if (confirmedSegments.length === 2) cutSegments = confirmedSegments;
+    }
+    const slicePoints = ringPoints.map((p, i) => ({ p, cut: rawCuts[i] }));
+    const outerEnds = (side) => [side[0], side[side.length - 1]];
+    // A slice cut on only one side by a real poly/subPoly boundary can
+    // still be the "<"-shaped middle of a river, when its OTHER side
+    // already runs along the paper's own edge (a leaf pinned to a paper
+    // corner, say) rather than another poly: the paper edge itself never
+    // gets a `cut` tag (nothing "cuts" it — it's the outermost boundary
+    // there is), but it plays exactly the same role. Pairing the lone real
+    // cut with a same-side run of paper-boundary edges — if the two
+    // carrier lines cross with matching near/far radii from that crossing,
+    // the same "constant width" signature every real cut/bend shares —
+    // completes the pair.
+    if (cutSegments.length === 1) {
+      const cutEnds = outerEnds(cutSegments[0]);
+      const candidates = [
+        ...this._boundaryEdgeCandidates(slicePoints),
+        ...this._adjacentEdgeCandidates(slicePoints, cutEnds),
+      ];
+      const partner = candidates.find(candidate => this._isMatchingRadiusPair(cutEnds, candidate));
+      if (partner) cutSegments = [cutSegments[0], partner];
+    }
+    // Two independent real cuts (as opposed to the single-cut+partner-
+    // search case above) never had their own "constant width" checked
+    // against each other before computing `crossing` — _isMatchingRadiusPair()
+    // (already used just above, for the partner search) is exactly that
+    // check: near/far distances from the crossing point matching within 5%
+    // on both sides is the same "real corridor wall, not a coincidental
+    // line crossing" signature either way, whether the second cut came
+    // from a partner search or was always there. Skipping it here let two
+    // cuts whose carrier lines happen to cross SOMEWHERE (any two non-
+    // parallel lines do) stand in as a bend's apex even when neither cut's
+    // own actual extent comes anywhere near that point and the two "radii"
+    // pairs don't match at all — seen on real designs as a wildly wrong
+    // sector (test/prueba23.tmd5 edge 3's corridor in poly 1;
+    // test/prueba22.tmd5 edge 5's corridor in poly 2) instead of the plain
+    // quadrangular slice the two cuts actually bound. Requiring the match
+    // uses the exact same test a legitimate zero-inner-radius apex already
+    // passes (both sides' near distance is 0, and 0 always matches 0), so
+    // no separate carve-out is needed for that case.
+    const crossing = cutSegments.length === 2 && this._isMatchingRadiusPair(outerEnds(cutSegments[0]), outerEnds(cutSegments[1]))
+      ? this._lineIntersection(outerEnds(cutSegments[0]), outerEnds(cutSegments[1]))
+      : null;
+    return { cutSegments, crossing };
   }
 
-  // Recursion step for getPolygonCorridorSegments(): `siblings` is one
-  // "generation" of non-triangle subPolys all descended from the same
-  // first-order polygon (initially a first-order polygon's own direct
-  // non-triangle children; then, going inward, each generation's own
-  // non-triangle children as one combined group — see
-  // _nextPolygonSiblings()). Splits `pool` (facets still unclaimed by an
-  // outer generation) into whatever falls outside every sibling in this
-  // generation (pushed as one "B" segment) and whatever falls inside at
-  // least one of them; that "inside" part either recurses into the next
-  // generation inward, or — once there's no non-triangle generation left
-  // to recurse into — is pushed as one "residue" segment, the innermost
-  // leftover this whole first-order polygon's recursion bottoms out at.
-  // Siblings are combined with plain OR (inside sibling A or sibling B),
-  // never tested against each other, so — unlike testing each sibling
-  // against the same pool independently — no facet is ever double-counted
-  // between two siblings of the same generation.
-  _walkPolygonLevel(siblings, pool, edge, segments) {
-    if (siblings.length === 0 || pool.length === 0) return;
-    const inside = pool.filter(f => siblings.some(poly => poly.containsPoint(f.getCentroid())));
-    const outside = pool.filter(f => !siblings.some(poly => poly.containsPoint(f.getCentroid())));
-    if (outside.length > 0) {
-      segments.push({ edge, polys: siblings, kind: 'B', rings: this._weldFacetGroup(outside) });
-    }
-    const nextSiblings = this._nextPolygonSiblings(siblings);
-    if (nextSiblings.length === 0) {
-      if (inside.length > 0) {
-        segments.push({ edge, polys: siblings, kind: 'residue', rings: this._weldFacetGroup(inside) });
+  // Internal helper for getWeldedCorridors(): re-welds `pieces` (each a
+  // closed ring of `{ p: {x,y}, cut }`, all belonging to the SAME poly)
+  // into as few rings as the material actually needs, on the chance
+  // _sliceRingByPolyTree() hung more than one leaf off that poly for what
+  // is really just one contiguous region — see getWeldedCorridors()'s own
+  // comment on why that can happen. Same tip-to-tail edge-welding as
+  // _weldFacetGroup() (an edge two pieces share — one appearing once in
+  // each piece's own boundary — is an artifact seam between them and gets
+  // dropped; whatever's left, appearing in only one piece, is the merged
+  // region's real outer boundary), just matching edges by rounded
+  // coordinate instead of shared tmVertex identity, since two different
+  // clipped pieces never actually share a point OBJECT even where they
+  // share a location.
+  _weldPointRings(pieces) {
+    const keyOf = (p) => `${p.x.toFixed(6)},${p.y.toFixed(6)}`;
+    // A point right where two pieces join can carry a genuine `cut: true`
+    // in ONE piece's own boundary (that piece's clip produced it as a
+    // fresh crossing) while the OTHER piece only ever saw it as an
+    // inherited, unremarkable point along its own edge (`cut: false`) —
+    // both describe the exact same real corner, just from each piece's own
+    // partial view of it. Picking whichever piece's edge the final chain
+    // happens to arrive from (as this used to) silently drops the other
+    // piece's `true`, and which piece "wins" isn't even the same between a
+    // design's own mirror-symmetric halves — the true flag survives on one
+    // side and gets lost on the other purely from which piece's remaining
+    // edges the weld happened to consume first, fragmenting one side's
+    // cutSegments differently from its mirror's. Recording every point's
+    // own flag by coordinate first, OR-combined across every piece that
+    // mentions it, keeps a real crossing real no matter which piece's edge
+    // the final ring ends up reaching it through — except right on the
+    // paper's own boundary, which no poly/subPoly clip ever produces (the
+    // paper rectangle isn't among the polys _sliceRingByPolyTree() clips
+    // against at all): a `cut: true` landing exactly there in even one
+    // piece is itself the same kind of stray artifact _dedupeRingPoints()
+    // already guards against elsewhere, not a real crossing to preserve,
+    // and OR-combining it in would draw a spurious extra corner into what
+    // should be one plain straight run along the paper's edge.
+    const onPaperEdge = (p) => (
+      Math.abs(p.x) < 1e-6 || Math.abs(p.x - this.paperWidth) < 1e-6 ||
+      Math.abs(p.y) < 1e-6 || Math.abs(p.y - this.paperHeight) < 1e-6
+    );
+    const pointCut = new Map();
+    for (const piece of pieces) {
+      for (const pt of piece) {
+        const k = keyOf(pt.p);
+        const cut = pt.cut && !onPaperEdge(pt.p);
+        pointCut.set(k, (pointCut.get(k) || false) || cut);
       }
-    } else {
-      this._walkPolygonLevel(nextSiblings, inside, edge, segments);
     }
-  }
-
-  // Equivalent to nothing in the original — this SPA's own query, an
-  // alternative to the getWideBandPolys()-based band cut: instead of a
-  // poly's own hollowed-out band, this tests against whole, un-hollowed
-  // polygons. For every first-order polygon (a top-level, no-parent poly —
-  // see getLooseTrianglePolys()'s own top-level check — with more than 3
-  // sides) and every internal corridor's Segment-A-free "outside" material
-  // (see _outsideCorridorFacetGroups()), recurses inward through the
-  // first-order polygon's own non-triangle subPolys (see
-  // _walkPolygonLevel()): the first-order polygon itself is never tested
-  // (it only kicks off the recursion into its own children), and each
-  // inward generation of non-triangle subPolys splits whatever the outer
-  // generations left unclaimed into a "B" piece (outside this generation)
-  // and a shrinking "residue" pool (inside it) that either feeds the next
-  // generation inward or, once there's nothing non-triangle left to
-  // recurse into, is itself recorded as the innermost "residue" piece.
-  // Returns a flat list of `{ edge, polys, kind: 'B' | 'residue', rings }`
-  // — `polys` is the whole sibling generation a piece came from, since
-  // siblings are only ever tested as one combined group.
-  getPolygonCorridorSegments() {
-    const firstOrderPolys = this.polys.filter(poly => poly.getVertices().length > 3);
-    const segments = [];
-    for (const [edge, outsideFacets] of this._outsideCorridorFacetGroups()) {
-      for (const firstOrder of firstOrderPolys) {
-        const firstGeneration = firstOrder.subPolys.filter(sp => sp.getVertices().length !== 3);
-        this._walkPolygonLevel(firstGeneration, outsideFacets, edge, segments);
+    const segCount = new Map();
+    const segInfo = new Map();
+    for (const piece of pieces) {
+      const n = piece.length;
+      for (let i = 0; i < n; i += 1) {
+        const a = piece[i].p;
+        const bRec = piece[(i + 1) % n];
+        const ka = keyOf(a);
+        const kb = keyOf(bRec.p);
+        const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+        segCount.set(key, (segCount.get(key) || 0) + 1);
+        segInfo.set(key, { a, b: bRec.p });
       }
     }
-    return segments;
+
+    const remaining = [...segCount.entries()]
+      .filter(([, count]) => count === 1)
+      .map(([key]) => segInfo.get(key));
+
+    // A clean weld needs every surviving boundary point to touch exactly
+    // 2 of these edges — same as any simple polygon. More than 2 means
+    // several pieces (or the SAME piece more than once) merely touch at a
+    // single point without sharing a full edge there — a multi-way hub
+    // several corridors/wedges converge on, common in a more complex
+    // design — where tip-to-tail chaining can't tell which continuation
+    // is correct and risks stitching an invalid, self-crossing ring.
+    // Bailing out to the untouched pieces is always safe: it just leaves
+    // this poly's material as the separate leaves _sliceRingByPolyTree()
+    // already produced, same as before this method ever ran.
+    const degree = new Map();
+    for (const seg of remaining) {
+      const ka = keyOf(seg.a);
+      const kb = keyOf(seg.b);
+      degree.set(ka, (degree.get(ka) || 0) + 1);
+      degree.set(kb, (degree.get(kb) || 0) + 1);
+    }
+    if ([...degree.values()].some(d => d > 2)) return pieces;
+
+    const rings = [];
+    while (remaining.length > 0) {
+      const seg0 = remaining.shift();
+      const startKey = keyOf(seg0.a);
+      const ring = [{ p: seg0.a, cut: pointCut.get(startKey) || false }];
+      let curPoint = seg0.b;
+      while (keyOf(curPoint) !== startKey) {
+        ring.push({ p: curPoint, cut: pointCut.get(keyOf(curPoint)) || false });
+        const curKey = keyOf(curPoint);
+        const idx = remaining.findIndex(s => keyOf(s.a) === curKey || keyOf(s.b) === curKey);
+        if (idx === -1) break; // open chain — shouldn't happen for a valid weld
+        const seg = remaining.splice(idx, 1)[0];
+        curPoint = keyOf(seg.a) === curKey ? seg.b : seg.a;
+      }
+      rings.push(ring);
+    }
+    return rings;
   }
 
-  // Chains a group of facets' outer-boundary edges (every edge exactly one
-  // of the group's facets has — two means it's an internal seam between
-  // two of the group's own facets, and gets dropped) into one or more
-  // closed rings of tmVertex, by repeatedly following shared endpoints.
+  // Internal helper for getWeldedCorridors(): every stretch of
+  // `slicePoints` lying along the SAME edge of the paper (consecutive
+  // points all sharing x=0, all sharing x=paperWidth, etc.), as a candidate
+  // `[a, b]` segment between any two of that run's own points — not just
+  // its outer two endpoints — the same shape a real cut comes in. Multiple
+  // points along one paper edge happen whenever the slice's own facets meet
+  // that edge at more than one spot (a facet corner touching it partway
+  // along, say); the run's own FULL span is one such facet-corner-to-facet-
+  // corner stretch, but a facet corner partway along it can just as well be
+  // where THIS slice's own true paper contact actually ends and a
+  // DIFFERENT neighboring slice's own contact continues, collinear but not
+  // really the same edge for constant-width-matching purposes — trying
+  // every sub-span, not just the outer one, lets _isMatchingRadiusPair()
+  // find whichever one actually shares this slice's own cut's width instead
+  // of only ever seeing the longest, possibly-too-long, candidate.
+  _boundaryEdgeCandidates(slicePoints) {
+    const width = this.paperWidth;
+    const height = this.paperHeight;
+    const side = (p) => {
+      if (Math.abs(p.x) < 1e-4) return 'L';
+      if (Math.abs(p.x - width) < 1e-4) return 'R';
+      if (Math.abs(p.y) < 1e-4) return 'T';
+      if (Math.abs(p.y - height) < 1e-4) return 'B';
+      return null;
+    };
+    const n = slicePoints.length;
+    const sides = slicePoints.map(sp => side(sp.p));
+    const candidates = [];
+    for (let i = 0; i < n; i += 1) {
+      if (!sides[i]) continue;
+      const prevIdx = (i - 1 + n) % n;
+      if (sides[prevIdx] === sides[i]) continue; // mid-run, not a run start
+      const runIdx = [i];
+      let j = i;
+      while (sides[(j + 1) % n] === sides[i] && (j + 1) % n !== i) {
+        j = (j + 1) % n;
+        runIdx.push(j);
+      }
+      for (let a = 0; a < runIdx.length; a += 1) {
+        for (let b = a + 1; b < runIdx.length; b += 1) {
+          candidates.push([slicePoints[runIdx[a]].p, slicePoints[runIdx[b]].p]);
+        }
+      }
+    }
+    return candidates;
+  }
+
+  // Internal helper for getWeldedCorridors(): every natural (non-cut) edge
+  // of `slicePoints` that touches one of `cutEnds`' own two endpoints — a
+  // second candidate a lone real cut can pair with to complete a sector,
+  // alongside _boundaryEdgeCandidates()'s paper-edge runs. A poly/subPoly
+  // boundary that happens to cross the corridor exactly AT an existing
+  // natural vertex, rather than out in the middle of some facet edge,
+  // leaves that vertex as the shared apex of a genuine CIRCULAR sector —
+  // inner radius zero, since the cut and this natural edge both start
+  // there — with the natural edge's own far end anchoring the sector's
+  // other straight side and an outward-bulging arc (through whatever
+  // convex natural corners lie between the two far ends) replacing what
+  // would otherwise stay a plain angular corner. _isMatchingRadiusPair()'s
+  // own length check, not mere ring adjacency, is what actually confirms a
+  // real match, so offering every edge touching either end costs nothing
+  // when it isn't one.
+  _adjacentEdgeCandidates(slicePoints, cutEnds) {
+    const tol = 1e-6;
+    const same = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < tol;
+    const n = slicePoints.length;
+    const candidates = [];
+    for (let i = 0; i < n; i += 1) {
+      const a = slicePoints[i].p;
+      const b = slicePoints[(i + 1) % n].p;
+      const isCutEdge = (same(a, cutEnds[0]) && same(b, cutEnds[1])) || (same(a, cutEnds[1]) && same(b, cutEnds[0]));
+      if (isCutEdge) continue;
+      if (same(a, cutEnds[0]) || same(b, cutEnds[0]) || same(a, cutEnds[1]) || same(b, cutEnds[1])) {
+        candidates.push([a, b]);
+      }
+    }
+    return candidates;
+  }
+
+  // Internal helper for getWeldedCorridors(): true when segments `seg1`
+  // and `seg2`'s carrier lines cross at a point equally far (within 5%)
+  // from each segment's own near end, and again from each one's own far
+  // end — the "constant width along its whole run" signature that ties a
+  // real cut to whatever its matching partner is (another real cut for
+  // the ordinary case, or a paper-boundary run — see
+  // _boundaryEdgeCandidates() — when a river runs off the paper before a
+  // second poly/subPoly boundary ever cuts it).
+  _isMatchingRadiusPair(seg1, seg2) {
+    const crossing = this._lineIntersection(seg1, seg2);
+    if (!crossing) return false;
+    const dist = (p) => Math.hypot(p.x - crossing.x, p.y - crossing.y);
+    const [n1, f1] = [dist(seg1[0]), dist(seg1[1])].sort((a, b) => a - b);
+    const [n2, f2] = [dist(seg2[0]), dist(seg2[1])].sort((a, b) => a - b);
+    const close = (a, b) => Math.abs(a - b) < 0.05 * Math.max(a, b, 1e-6);
+    return close(n1, n2) && close(f1, f2);
+  }
+
+  // A river doesn't always run straight — the tree edge's own zigzag path
+  // through the crease pattern can bend, and where it does, one side of
+  // the welded outline (this method looks at one ring at a time) gets a
+  // convex corner (fine as a plain corner) while the OTHER gets a
+  // concave, inward-pointing notch: the same "<" wedge shape
+  // getWeldedCorridors()'s two-cuts-converging-outside case already
+  // rounds into a sector, just formed differently here — instead of two
+  // SEPARATE cut edges whose carrier lines meet somewhere outside the
+  // ring, it's two edges that already meet each other, directly, at one
+  // shared ring vertex. Equal length (the same "constant width along its
+  // whole run" signature every cut/bend in a corridor shares) is what
+  // tells a genuine bend apart from an ordinary concave corner that just
+  // happens to exist in the design elsewhere. Returns
+  // `{ index, radius }` per bend found — `index` into `points`, `radius`
+  // the (averaged) length of its two matching edges, i.e. the corner's
+  // own rounding radius when CanvasRenderer draws it as an arc centered
+  // on that vertex.
+  _findBendVertices(points) {
+    const n = points.length;
+    if (n < 3) return [];
+    let area = 0;
+    for (let i = 0; i < n; i += 1) {
+      const a = points[i];
+      const b = points[(i + 1) % n];
+      area += a.x * b.y - b.x * a.y;
+    }
+    const ccw = area > 0;
+    const bends = [];
+    for (let i = 0; i < n; i += 1) {
+      const prev = points[(i - 1 + n) % n];
+      const cur = points[i];
+      const next = points[(i + 1) % n];
+      const v1 = { x: cur.x - prev.x, y: cur.y - prev.y };
+      const v2 = { x: next.x - cur.x, y: next.y - cur.y };
+      const cross = v1.x * v2.y - v1.y * v2.x;
+      const isConcave = ccw ? cross < -1e-9 : cross > 1e-9;
+      if (!isConcave) continue;
+      const len1 = Math.hypot(v1.x, v1.y);
+      const len2 = Math.hypot(v2.x, v2.y);
+      if (Math.abs(len1 - len2) > 0.02 * Math.max(len1, len2)) continue;
+      bends.push({ index: i, radius: (len1 + len2) / 2 });
+    }
+    return bends;
+  }
+
+  // Welds a group of facets into one or more closed outline rings of
+  // tmVertex, by dropping any edge shared by two of the group's own facets
+  // (an internal seam) and chaining what's left (each appearing exactly
+  // once) tip-to-tail.
   _weldFacetGroup(facetGroup) {
     const segCount = new Map();
     const segEndpoints = new Map();
@@ -1090,6 +2016,244 @@ export class tmTree {
       rings.push(ring);
     }
     return rings;
+  }
+
+  // Intersection of the infinite lines through segments `[a, b]` and
+  // `[c, d]` (plain {x,y} points), or null if they're parallel (or nearly
+  // so). The parallel test is on the cross product of the two segments'
+  // NORMALIZED direction vectors (i.e. sin of the angle between them), not
+  // the raw, unnormalized cross product `denom` used for the actual
+  // intersection below — `denom` scales with both segments' lengths, so a
+  // fixed absolute epsilon on it only catches near-parallel pairs when the
+  // segments happen to be long; two short cut segments that are merely a
+  // fraction of a degree off parallel (a common, legitimate case for a
+  // corridor's two constant-width cut sides) sail through with a tiny but
+  // nonzero `denom`, producing an "intersection" thousands of units away —
+  // a wrong crossing point that then makes a wildly out-of-bounds sector,
+  // one whose canvas rendering has been observed to vary by browser engine
+  // rather than simply drawing something visibly wrong everywhere. The
+  // normalized test is invariant to segment length, so it correctly reads
+  // this as "no real crossing" and falls back to the plain ring outline.
+  _lineIntersection([a, b], [c, d]) {
+    const d1x = b.x - a.x, d1y = b.y - a.y;
+    const d2x = d.x - c.x, d2y = d.y - c.y;
+    const len1 = Math.hypot(d1x, d1y), len2 = Math.hypot(d2x, d2y);
+    if (len1 < 1e-12 || len2 < 1e-12) return null;
+    const sinAngle = (d1x * d2y - d1y * d2x) / (len1 * len2);
+    if (Math.abs(sinAngle) < 1e-4) return null;
+    const denom = (a.x - b.x) * (c.y - d.y) - (a.y - b.y) * (c.x - d.x);
+    const t = ((a.x - c.x) * (c.y - d.y) - (a.y - c.y) * (c.x - d.x)) / denom;
+    return new tmPoint(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y));
+  }
+
+  // Every edge (each as its two tmVertex) `facet` shares with `other` — both
+  // edges are the same two points, in either order. Usually at most one,
+  // but two facets can legitimately share TWO consecutive edges at once
+  // (observed: a facet whose own middle vertex, between those two edges, is
+  // a degree-2 point that carries no crease of its own — nothing along the
+  // whole real crease pattern actually separates the two edges there, so
+  // both read as shared) — getRiverEndCaps() needs every one of them, not
+  // just whichever this scan happens to reach first, or it mistakes that
+  // middle vertex for a free tip of the facet rather than the fully-shared,
+  // consumed vertex it actually is. Internal helper for getRiverEndCaps().
+  _facetSharedEdgesWith(facet, other) {
+    const verts = facet.getVertices();
+    const overts = other.getVertices();
+    const shared = [];
+    for (let i = 0; i < verts.length; i += 1) {
+      const a = verts[i];
+      const b = verts[(i + 1) % verts.length];
+      for (let j = 0; j < overts.length; j += 1) {
+        const c = overts[j];
+        const d = overts[(j + 1) % overts.length];
+        if ((a === c && b === d) || (a === d && b === c)) { shared.push([a, b]); break; }
+      }
+    }
+    return shared;
+  }
+
+  // The first edge (as its two tmVertex) `facet` shares with `other`, or
+  // null if they don't share one — see _facetSharedEdgesWith() when more
+  // than one might matter. Internal helper for getRiverEndCaps().
+  _facetSharedEdgeWith(facet, other) {
+    return this._facetSharedEdgesWith(facet, other)[0] || null;
+  }
+
+  // Equivalent to nothing in the original — Blueprint View's own query: the
+  // "end caps" of each internal river (see _internalCorridorFacetGroups())
+  // — the true loose ends of its facet chain, as opposed to the long
+  // zigzag sides running its length or the internal seams between
+  // consecutive facets (which getWeldedCorridors() may or may not cut,
+  // depending on whether a poly/subPoly boundary happens to cross there).
+  //
+  // A facet's edges split into those it shares with another facet in the
+  // same group (an internal seam) and those it doesn't. For an ordinary
+  // facet in the middle of the chain, the unshared edges are its own two
+  // long sides — never adjacent to each other, so marking every vertex that
+  // touches ANY shared edge leaves no vertex untouched at all (each corner
+  // sits on one shared edge or the other). A facet at a real dead end is
+  // different: however many neighbors it has, their shared edges leave a
+  // single contiguous run of untouched vertices — the free tip sticking out
+  // past the rest of the river. This is deliberately NOT restricted to
+  // facets with exactly one neighbor: a facet can sit on a genuine loose
+  // end while still bordering two others, when the branch that meets it
+  // there loops back on itself (observed: a tiny gusset-bounded facet right
+  // at a branch node, whose two neighbors' shared edges happen to be
+  // adjacent to each other rather than opposite, leaving the facet's other,
+  // unrelated edges as a real tip the degree-1 test alone would miss). A
+  // facet fully consumed by its neighbors (every vertex touched, as at an
+  // ordinary pass-through facet, or at a branch facet with 3+ neighbors
+  // meeting with no free edge of its own left over) or one whose untouched
+  // vertices split into more than one separate run (ambiguous — which run
+  // is the real cap?) isn't a cap at all. Returns a flat list of
+  // `{ edge, a, b, outward }` — `a`/`b` the two tmVertex flanking the run
+  // (its own interior vertices, if any, aren't needed: getRiverExtensions()
+  // only extrudes a straight cap between them), `outward` the unit vector
+  // away from the rest of the river, along which getRiverExtensions()
+  // continues it.
+  getRiverEndCaps() {
+    const groups = this._internalCorridorFacetGroups();
+    const caps = [];
+    for (const [edge, facetGroup] of groups) {
+      const neighborsOf = new Map(facetGroup.map(f => [f, []]));
+      for (let i = 0; i < facetGroup.length; i += 1) {
+        for (let j = i + 1; j < facetGroup.length; j += 1) {
+          if (this._facetSharedEdgeWith(facetGroup[i], facetGroup[j])) {
+            neighborsOf.get(facetGroup[i]).push(facetGroup[j]);
+            neighborsOf.get(facetGroup[j]).push(facetGroup[i]);
+          }
+        }
+      }
+      for (const facet of facetGroup) {
+        const neighbors = neighborsOf.get(facet);
+        if (neighbors.length === 0) continue; // whole river is one facet — genuinely ambiguous, skip
+        const verts = facet.getVertices();
+        const n = verts.length;
+        const touched = new Array(n).fill(false);
+        for (const other of neighbors) {
+          for (const [a, b] of this._facetSharedEdgesWith(facet, other)) {
+            const idxA = verts.indexOf(a);
+            const idxB = verts.indexOf(b);
+            if (idxA !== -1) touched[idxA] = true;
+            if (idxB !== -1) touched[idxB] = true;
+          }
+        }
+        const startIdx = touched.indexOf(true);
+        if (startIdx === -1 || touched.every(t => t)) continue;
+        const runs = [];
+        let cur = null;
+        for (let k = 0; k < n; k += 1) {
+          const idx = (startIdx + k) % n;
+          if (!touched[idx]) {
+            if (!cur) { cur = []; runs.push(cur); }
+            cur.push(idx);
+          } else {
+            cur = null;
+          }
+        }
+        if (runs.length !== 1 || runs[0].length < 2) continue;
+        const run = runs[0];
+        const a = verts[run[0]];
+        const b = verts[run[run.length - 1]];
+        const centroidOf = (pts) => ({
+          x: pts.reduce((sum, v) => sum + v.getLocX(), 0) / pts.length,
+          y: pts.reduce((sum, v) => sum + v.getLocY(), 0) / pts.length
+        });
+        const touchedMid = centroidOf(verts.filter((_, i) => touched[i]));
+        const capMid = centroidOf(run.map(i => verts[i]));
+        const outward = this._normalize2D({ x: capMid.x - touchedMid.x, y: capMid.y - touchedMid.y });
+        caps.push({ edge, a, b, outward });
+      }
+    }
+    return caps;
+  }
+
+  _normalize2D(v) {
+    const len = Math.hypot(v.x, v.y);
+    return len > 1e-9 ? { x: v.x / len, y: v.y / len } : { x: 0, y: 0 };
+  }
+
+  // How far (as a multiple of `dir`, a unit vector) `origin` travels before
+  // leaving the [0, width] x [0, height] rectangle — the paper — or
+  // Infinity if `dir` never carries it out (a zero component parallel to a
+  // pair of edges it's already between). Internal helper for
+  // getRiverExtensions(): the same ray-vs-axis-aligned-box exit distance
+  // _drawSymmetryLines() computes in CanvasRenderer, reused here in model
+  // space instead of screen space.
+  _rayExitDistance(origin, dir, width, height) {
+    let t = Infinity;
+    if (dir.x > 1e-9) t = Math.min(t, (width - origin.x) / dir.x);
+    else if (dir.x < -1e-9) t = Math.min(t, (0 - origin.x) / dir.x);
+    if (dir.y > 1e-9) t = Math.min(t, (height - origin.y) / dir.y);
+    else if (dir.y < -1e-9) t = Math.min(t, (0 - origin.y) / dir.y);
+    return t;
+  }
+
+  // Equivalent to nothing in the original — Blueprint View's own query:
+  // Robert Lang's tree-theory rivers run the full length of the tree edge
+  // they represent, but this SPA's own crease-pattern-derived rendering
+  // (getWeldedCorridors()) only ever covers however much of that a real
+  // facet happens to fill — which can end well short of the paper, deep in
+  // open territory the crease pattern never needed to touch. This extends
+  // each of getRiverEndCaps()'s two loose ends, straight out along its own
+  // `outward` direction at the SAME width as the cap itself (the same
+  // "constant width along its whole run" rule every welded/sliced piece
+  // already follows).
+  //
+  // The cap's own two corners are, in general, different distances from
+  // the paper's edge along that shared direction (only a cap running
+  // exactly parallel to the edge it's headed for would tie) — so extending
+  // by the SHORTER of the two distances would stop one corner short of the
+  // edge, while the other has already reached it. Extending by the LONGER
+  // one instead guarantees the whole strip is at least "completely
+  // inscribed in the paper" along BOTH of its own long sides — but not
+  // necessarily enough to cover a paper CORNER the strip runs past at an
+  // angle: the corner can sit well within the strip's own width (between
+  // its two long sides, extended) while still being farther from the cap
+  // than either individual corner's own exit distance, since those two
+  // exit distances are measured along parallel rays through DIFFERENT
+  // points (pa and pb), not through the corner itself. Padding the longer
+  // distance by a full paper diagonal guarantees the strip reaches well
+  // past any point in the paper regardless of angle, so the corner is
+  // never missed; clipping the resulting (now generously oversized) quad
+  // against the paper rectangle — _clipConvexInside() again, the paper
+  // being just another convex polygon — trims away all of that overshoot,
+  // leaving a strip flush with the paper's edge (corners included)
+  // everywhere along it.
+  //
+  // Returns a flat list of `{ edge, rings }`, one entry per end cap that
+  // still needed extending, in the same shape getWeldedCorridors() uses
+  // for rendering.
+  getRiverExtensions() {
+    const width = this.paperWidth;
+    const height = this.paperHeight;
+    const paperRing = [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height }];
+    const overshoot = Math.hypot(width, height);
+    const result = [];
+    for (const { edge, a, b, outward } of this.getRiverEndCaps()) {
+      const pa = { x: a.getLocX(), y: a.getLocY() };
+      const pb = { x: b.getLocX(), y: b.getLocY() };
+      const t = overshoot + Math.max(
+        this._rayExitDistance(pa, outward, width, height),
+        this._rayExitDistance(pb, outward, width, height)
+      );
+      if (!Number.isFinite(t) || t <= 1e-6) continue;
+      const qa = { x: pa.x + outward.x * t, y: pa.y + outward.y * t };
+      const qb = { x: pb.x + outward.x * t, y: pb.y + outward.y * t };
+      // The pa->pb edge is the cap itself — the corridor's own end, where
+      // this extension is welded on. Marking pb's own `cut` (the same
+      // "edge arriving at this point is a seam" convention getWeldedCor-
+      // ridors() uses) lets Rivers view (see CanvasRenderer._drawWelded-
+      // Corridors()'s `weldedRivers` mode) skip stroking exactly that
+      // edge, same as any other seam between two pieces of one river.
+      const clipped = this._dedupeRingPoints(this._clipConvexInside(
+        [{ p: pa, cut: false }, { p: pb, cut: true }, { p: qb, cut: false }, { p: qa, cut: false }],
+        paperRing
+      ));
+      if (clipped.length < 3) continue;
+      result.push({ edge, rings: [clipped.map(c => c.p)], ringCuts: [clipped.map(c => !!c.cut)] });
+    }
+    return result;
   }
 
   // ===== SETTERS =====
