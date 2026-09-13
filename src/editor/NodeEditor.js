@@ -12,7 +12,15 @@ export class NodeEditor {
     
     // Modo de edición
     this.mode = 'select'; // 'select', 'addNode', 'addEdge'
-    
+
+    // Toggle persistente (botón propio sobre el canvas, ver
+    // multiSelectToggleBtn en main.js) que hace que CUALQUIER clic/tap se
+    // comporte como un shift+click — necesario en tablets/celulares, donde
+    // no hay tecla Shift disponible para acumular selección. Ver
+    // _isMultiSelectGesture() más abajo: cada lugar que hoy revisa
+    // `e.shiftKey` para selección múltiple pasa por ahí en su lugar.
+    this.multiSelectMode = false;
+
     // Estado
     this.selectedNode = null;
     this.selectedEdge = null;
@@ -649,6 +657,17 @@ export class NodeEditor {
   }
 
   /**
+   * True para un shift+click real O con multiSelectMode activo — todo el
+   * código de selección múltiple de este archivo pasa por acá en vez de
+   * leer `e.shiftKey` directo, así el toggle de la barra del canvas cubre
+   * los mismos casos que ya cubría Shift.
+   * @private
+   */
+  _isMultiSelectGesture(e) {
+    return e.shiftKey || this.multiSelectMode;
+  }
+
+  /**
    * Manejo del modo de selección
    * @private
    */
@@ -671,7 +690,7 @@ export class NodeEditor {
     // _clearDerivedSelection() a plain click needs below (to swap between
     // a single vertex/crease/facet/poly/path selection), or a shift-click
     // would immediately wipe whatever was already accumulated.
-    if (e.shiftKey && ['path', 'vertex', 'crease', 'poly'].includes(obj?.type)) {
+    if (this._isMultiSelectGesture(e) && ['path', 'vertex', 'crease', 'poly'].includes(obj?.type)) {
       this._toggleShiftSelection(obj.type, obj.object);
       return;
     }
@@ -688,7 +707,7 @@ export class NodeEditor {
     this._resetDrag();
 
     if (obj?.type === 'node') {
-      if (e.shiftKey) {
+      if (this._isMultiSelectGesture(e)) {
         const index = this.selectedNodes.indexOf(obj.object);
         if (index >= 0) this.selectedNodes.splice(index, 1);
         else this.selectedNodes.push(obj.object);
@@ -714,7 +733,7 @@ export class NodeEditor {
       this._armGroupDrag(e, screenX, screenY);
       console.log(`Nodo seleccionado: ${obj.object.label}`);
     } else if (obj?.type === 'edge') {
-      if (e.shiftKey) {
+      if (this._isMultiSelectGesture(e)) {
         const index = this.selectedEdges.indexOf(obj.object);
         if (index >= 0) this.selectedEdges.splice(index, 1);
         else this.selectedEdges.push(obj.object);

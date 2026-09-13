@@ -1,3 +1,7 @@
+import { ConditionNodeCombo } from '../conditions/ConditionNodeCombo.js';
+import { ConditionNodeSymmetric } from '../conditions/ConditionNodeSymmetric.js';
+import { ConditionNodesPaired } from '../conditions/ConditionNodesPaired.js';
+
 function angleDifference(first, second) {
   let difference = first - second;
   while (difference > Math.PI) difference -= 2 * Math.PI;
@@ -39,7 +43,7 @@ export function constraintResiduals(condition, tree) {
   // below (which exist for the legacy per-flag v4 classes) since this class
   // also exposes getXFixed()/getYFixed() but needs its own dispatch to
   // cover toSymmetryLine/toPaperEdge/toPaperCorner too.
-  if (condition.constructor.name === 'ConditionNodeCombo') {
+  if (condition instanceof ConditionNodeCombo) {
     const node = condition.getNode?.();
     if (!node) return [];
     const loc = node.getLoc();
@@ -85,7 +89,7 @@ export function constraintResiduals(condition, tree) {
     return [location.x - target.x, location.y - target.y];
   }
 
-  if (condition.constructor.name === 'ConditionNodeSymmetric') {
+  if (condition instanceof ConditionNodeSymmetric) {
     const node = condition.getNode1?.();
     if (!node || !tree?.hasSymmetryLine?.()) return [];
     const location = node.getLoc();
@@ -115,7 +119,7 @@ export function constraintResiduals(condition, tree) {
     // are mirror images of each other about the tree's symmetry line —
     // PairFn1A (segment perpendicular to the line) and PairFn1B (their
     // midpoint lies on the line), see tmConstraintFns.cpp.
-    if (condition.constructor.name === 'ConditionNodesPaired') {
+    if (condition instanceof ConditionNodesPaired) {
       if (!tree?.hasSymmetryLine?.()) return [];
       const center = tree.getSymLoc();
       const direction = tree.getSymDir();

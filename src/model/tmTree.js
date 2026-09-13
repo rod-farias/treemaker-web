@@ -339,12 +339,48 @@ export class tmTree {
     this.setHasSymmetry(value !== 'none');
     if (value === 'book') this.setSymmetry(new tmPoint(0.5, 0.5), flipAngleDegrees(90));
     if (value === 'diagonal') this.setSymmetry(new tmPoint(0.5, 0.5), flipAngleDegrees(45));
+    if (value === 'none') this._clearSymmetryDependentConditions();
     this.invalidate();
+  }
+
+  // Turning the symmetry line off leaves ConditionNodeCombo's "Fixed to
+  // Symmetry Line" flag and every ConditionNodesPaired condition pointing
+  // at a line that no longer exists — neither is in IsValidCondition()'s
+  // remit (both are still structurally valid conditions), so
+  // _pruneInvalidConditions() alone would leave them stuck in place,
+  // checked and unenforceable, once the Inspector's toggles go disabled.
+  _clearSymmetryDependentConditions() {
+    for (const condition of this.conditions.slice()) {
+      if (condition instanceof ConditionNodesPaired) {
+        this.removeCondition(condition);
+      } else if (condition instanceof ConditionNodeCombo && condition.getToSymmetryLine()) {
+        condition.setToSymmetryLine(false);
+        if (condition.isEmpty()) this.removeCondition(condition);
+      }
+    }
   }
 
   getSymDir() {
     const angleRad = this.symAngle * (Math.PI / 180);
     return new tmPoint(Math.cos(angleRad), Math.sin(angleRad));
+  }
+
+  // Same reflection ConditionNodesPaired.addConstraints() computes inline
+  // for its own (legacy, node1-is-always-the-anchor) solve path — pulled
+  // out here so other features (e.g. Synchronize Paired Node Editing, which
+  // picks whichever of the two paired nodes is the anchor dynamically) can
+  // mirror an arbitrary point across the tree's symmetry line without
+  // duplicating the math.
+  mirrorPointAcrossSymmetryLine(x, y) {
+    const center = this.getSymLoc();
+    const direction = this.getSymDir();
+    const dx = x - center.x;
+    const dy = y - center.y;
+    const dot = dx * direction.x + dy * direction.y;
+    return new tmPoint(
+      2 * center.x + 2 * dot * direction.x - x,
+      2 * center.y + 2 * dot * direction.y - y
+    );
   }
 
   isFeasibleTree() {
@@ -543,20 +579,28 @@ export class tmTree {
    * comando distinto del original sobre TODO el árbol.
    *
    * Diferencia deliberada con el original: tmwxDoc::OnScaleSelection() solo
-   * incluye una arista como "estirable" si el usuario la seleccionó
-   * explícitamente además de la hoja — aunque una hoja (grado 1) tiene una
-   * única arista posible, sin ambigüedad sobre cuál sería. Exigir los dos
-   * clics es simplemente incómodo, así que acá se agrega sola: por cada
-   * hoja seleccionada cuya arista incidente no esté ya en la selección, se
-   * suma esa arista antes de pasarle todo a EdgeOptimizer.
+   * corre si el usuario seleccionó explícitamente TANTO la hoja COMO su
+   * arista incidente — aunque una hoja (grado 1) tiene una única arista
+   * posible, sin ambigüedad sobre cuál sería. Exigir los dos clics es
+   * simplemente incómodo, así que acá cualquiera de los dos basta y el otro
+   * se agrega solo: cada hoja seleccionada suma su arista incidente, y cada
+   * arista seleccionada suma cualquiera de sus dos extremos que sea hoja
+   * (normalmente uno; en un árbol de un solo edge, los dos) — antes de
+   * pasarle todo a EdgeOptimizer.
    */
   scaleSelection(selectedNodes = [], selectedEdges = [], options = {}) {
+    const augmentedNodes = new Set(selectedNodes);
     const augmentedEdges = new Set(selectedEdges);
     for (const node of selectedNodes) {
       if (node.getDegree() !== 1) continue;
       for (const edge of node.getEdges()) augmentedEdges.add(edge);
     }
-    const optimizer = new EdgeOptimizer(this, selectedNodes, [...augmentedEdges], options);
+    for (const edge of selectedEdges) {
+      for (const node of edge.nodes) {
+        if (node && node.getDegree() === 1) augmentedNodes.add(node);
+      }
+    }
+    const optimizer = new EdgeOptimizer(this, [...augmentedNodes], [...augmentedEdges], options);
     return optimizer.optimize();
   }
 
@@ -4119,7 +4163,15 @@ export class tmTree {
       return { type: 'edgeLengthFixed', edgeId: condition.getEdge()?.id, length: condition.getLength() };
     }
     if (condition instanceof ConditionNodesPaired) {
-      return { type: 'nodesPaired', node1Id: condition.getNode1()?.id, node2Id: condition.getNode2()?.id };
+      return {
+        type: 'nodesPaired',
+        node1Id: condition.getNode1()?.id,
+        node2Id: condition.getNode2()?.id,
+        // SPA-only flag (see the constructor comment in ConditionNodesPaired.js)
+        // — kept here so it survives undo/redo, which round-trips the whole
+        // tree through this same toJSON()/fromJSON() pair.
+        syncEditing: condition.getSyncEditing()
+      };
     }
     if (condition instanceof ConditionNodesCollinear) {
       return {
@@ -4254,7 +4306,10 @@ export class tmTree {
       } else if (conditionData.type === 'nodesPaired') {
         const node1 = nodeMap.get(conditionData.node1Id);
         const node2 = nodeMap.get(conditionData.node2Id);
-        if (node1 && node2) condition = new ConditionNodesPaired(tree, node1, node2);
+        if (node1 && node2) {
+          condition = new ConditionNodesPaired(tree, node1, node2);
+          condition.setSyncEditing(Boolean(conditionData.syncEditing));
+        }
       } else if (conditionData.type === 'nodesCollinear') {
         const node1 = nodeMap.get(conditionData.node1Id);
         const node2 = nodeMap.get(conditionData.node2Id);

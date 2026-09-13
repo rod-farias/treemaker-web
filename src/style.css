@@ -1050,6 +1050,21 @@ button.secondary {
   outline-offset: 2px;
 }
 
+.toggle-input:disabled + .toggle-track {
+  opacity: 0.5;
+}
+
+/* #propertiesPanel's own ID-scoped rules (cursor: pointer on .toggle-row,
+   color on every span) outrank a plain .toggle-row/span selector — repeat
+   the #propertiesPanel prefix here too, same reasoning as .toggle-row above. */
+#propertiesPanel .toggle-row:has(.toggle-input:disabled) {
+  cursor: not-allowed;
+}
+
+#propertiesPanel .toggle-row:has(.toggle-input:disabled) > span:last-child {
+  color: var(--text-5);
+}
+
 .hint {
   margin: 0;
   font-size: 0.7rem;
@@ -1307,16 +1322,52 @@ button.delete:hover {
   flex-direction: column;
 }
 
-/* Persistent bottom-left status row below the canvas: Scale (fixed width,
-   always visible — see renderScaleLabel() in main.js) then the currently
+/* Multi-select toggle — the touch equivalent of holding Shift while
+   clicking (see multiSelectToggleBtn in main.js/NodeEditor.multiSelectMode),
+   for tablets/phones with no Shift key. Lives inside .canvas-status-bar
+   below, sharing its cell (.canvas-info-label gives it the same background/
+   font/padding as Scale/hover-info next to it) — it used to float in the
+   canvas's own top-left corner instead, but that covered whatever the paper
+   had in that corner, so it moved down into this row (2026-09-12), where
+   nothing is ever drawn underneath. Unlike its two theme-independent
+   siblings (literal colors — see the comment above .canvas-info-label),
+   this one is a real control, and its "on" state reuses the app's own
+   --accent token (same convention as .mode-btn.active elsewhere) so it
+   reads as active consistently with the rest of the UI regardless of which
+   color theme is picked, rather than a fixed color of its own. */
+.canvas-toggle-btn {
+  pointer-events: auto;
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  border-radius: 4px;
+  /* .canvas-info-label's own `font` shorthand (monospace, for the numeric
+     Scale/hover readouts next to this) would otherwise carry over to this
+     button's actual UI text ("Multi-select") too — back to the app's
+     normal button typeface instead. */
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.canvas-toggle-btn.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent-light);
+}
+
+/* Persistent bottom-left status row below the canvas: the multi-select
+   toggle (see .canvas-toggle-btn above) first, then Scale (fixed width,
+   always visible — see renderScaleLabel() in main.js), then the currently
    pointed-at object (auto width, only shown while hovering something on
-   the canvas), side by side — see the matching markup in index.html.
-   Anchored to #treemakerLayer itself rather than the canvas element, so
-   it stays put in the same corner of the pane regardless of the canvas's
-   own zoom/scroll position — the same anchor the old floating Scale pill
-   used. align-items: center keeps both cells vertically centered against
-   each other (moot in practice, since both share the same height, but
-   correct either way). */
+   the canvas) — see the matching markup in index.html. Anchored to
+   #treemakerLayer itself rather than the canvas element, so it stays put
+   in the same corner of the pane regardless of the canvas's own zoom/
+   scroll position — the same anchor the old floating Scale pill used.
+   align-items: center keeps all three cells vertically centered against
+   each other (moot in practice, since they all share the same height, but
+   correct either way). pointer-events: none lets clicks on the row's own
+   empty gaps pass through to the canvas underneath, same as always — the
+   toggle button opts back into pointer-events: auto itself, since unlike
+   its two siblings it's an actual control. */
 .canvas-status-bar {
   position: absolute;
   left: 10px;
@@ -1508,7 +1559,12 @@ button.delete:hover {
 
 .about-box {
   align-items: center;
-  width: 450px;
+  /* Fixed 450px used to overflow off-screen on narrow phone widths (the
+     .busy-overlay flex container doesn't shrink a child below its explicit
+     width) — capped to the real viewport width minus the overlay's own
+     side margin so the box, and the warning text inside it, are always
+     fully visible without horizontal scrolling. */
+  width: min(450px, calc(100vw - 2rem));
 }
 
 .about-heading {
@@ -1701,6 +1757,35 @@ button.delete:hover {
   gap: 0.3rem;
   max-height: 220px;
   overflow-y: auto;
+}
+
+.export-pdf-box {
+  width: 320px;
+}
+
+.export-pdf-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.export-pdf-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.export-pdf-options input:disabled + span {
+  color: var(--text-5);
+}
+
+.export-pdf-rf-row {
+  margin-top: 0.2rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--surface-3);
 }
 
 /* Vertex List modal (View section's "Vertex List" button) — wider and

@@ -2,7 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Fixed width, matching .app-shell's own min-width (src/style.css) —
+         not "width=device-width". On a phone, .app-shell (1300px min-width,
+         non-responsive) is wider than the device, and "device-width" +
+         initial-scale=1 doesn't reliably stop mobile Chrome/Safari from
+         expanding the layout viewport to fit that overflow anyway; when it
+         does, the page's *initial* scroll position isn't guaranteed to be
+         (0,0) inside that expanded canvas, so on load the visible screen
+         can land on empty space well below/right of the real content —
+         confirmed happening on a real phone. Declaring the width explicitly
+         removes the guesswork: the browser computes scale = device-width /
+         1300 up front and starts at (0,0), so the whole app is visible,
+         zoomed out, right from the first paint — same as opening any other
+         fixed-width desktop site on a phone. Keep this in sync with
+         .app-shell's min-width if that value ever changes. -->
+    <meta name="viewport" content="width=1300" />
     <title>TreeMaker SPA</title>
     <!-- English always, regardless of the app's active UI language (SEO/
          social-preview metadata isn't part of the translated app itself) —
@@ -77,7 +91,9 @@
             <button id="resetBtn" class="secondary" data-i18n="controls.revert" disabled>Revert</button>
           </div>
           <button id="saveTmd5Btn" class="file-save-row" data-i18n="controls.save">Save .tmd5</button>
+          <button id="exportPdfBtn" class="file-save-row" data-i18n="controls.exportPdf">Export PDF</button>
         </details>
+
 
         <!-- Viewer Options -->
         <details class="panel collapsible">
@@ -300,13 +316,24 @@
       <main class="workspace">
         <div id="treemakerLayer" class="workspace-layer">
           <canvas id="patternCanvas" width="900" height="700"></canvas>
-          <!-- Persistent bottom-left status row: Scale first, then the
-               currently pointed-at object — see .canvas-status-bar in
+          <!-- Persistent bottom-left status row: multi-select toggle first
+               (fixed position, never shifts — see below), then Scale, then
+               the currently pointed-at object — see .canvas-status-bar in
                style.css. Scale is always visible (renderScaleLabel() in
                main.js falls back to just the word "Scale" until a solve
                has produced a value); the pointed-object cell only shows
                while hovering something on the canvas. -->
           <div class="canvas-status-bar">
+            <!-- Touch equivalent of holding Shift while clicking, for
+                 tablets/phones with no Shift key — see multiSelectToggleBtn
+                 in main.js. Placed first (not after the variable-width
+                 hover-info cell) so its own position never shifts based on
+                 whether something's being hovered. Originally a separate
+                 floating button in the canvas's top-left corner; moved into
+                 this row (2026-09-12) because it covered that corner of the
+                 paper — same row as Scale/hover-info instead, where nothing
+                 is ever drawn underneath. -->
+            <button id="multiSelectToggleBtn" type="button" class="canvas-info-label canvas-toggle-btn" data-i18n="canvas.multiSelect" data-i18n-aria-label="canvas.multiSelectAria" aria-label="Multi-select" aria-pressed="false">Multi-select</button>
             <div id="scaleLabel" class="canvas-info-label canvas-info-label-fixed"></div>
             <div id="hoverInfoLabel" class="canvas-info-label" style="display: none;"></div>
           </div>
@@ -453,6 +480,11 @@
               <input id="selPairToggle" type="checkbox" class="toggle-input" />
               <span class="toggle-track"><span class="toggle-thumb"></span></span>
               <span data-i18n="selection.pairNodes">2 Nodes Paired about Symmetry Line</span>
+            </label>
+            <label class="toggle-row">
+              <input id="selPairSyncToggle" type="checkbox" class="toggle-input" disabled />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span data-i18n="selection.pairSyncEdit">Synchronize Paired Node Editing</span>
             </label>
           </div>
 
@@ -801,6 +833,42 @@
         <div class="prompt-buttons">
           <button id="vertexListExportBtn" type="button" data-i18n="vertexList.export">Export</button>
           <button id="vertexListCloseBtn" type="button" class="primary" data-i18n="dialog.close">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export PDF modal (File section's "Export PDF" button): lets the
+         user pick which central-panel views go into the exported file, one
+         page per checked view — see openExportPdfDialog()/exportSelected
+         ViewsAsPdf() in main.js. Blueprint/Rivers stay hidden here the same
+         way their own View buttons are (still unfinished — see
+         PENDIENTE.md), so re-enabling both later is the same one-line
+         change in both places. -->
+    <div id="exportPdfOverlay" class="busy-overlay" style="display: none;">
+      <div class="busy-box prompt-box export-pdf-box">
+        <p class="prompt-title" data-i18n="exportPdf.title">Export PDF</p>
+        <p class="prompt-info" data-i18n="exportPdf.hint">Choose which views to include, one per page.</p>
+        <div id="exportPdfOptions" class="export-pdf-options">
+          <label><input type="checkbox" id="exportPdfViewDesign" checked /> <span data-i18n="view.design">Design</span></label>
+          <label><input type="checkbox" id="exportPdfViewTree" /> <span data-i18n="view.tree">Tree</span></label>
+          <label><input type="checkbox" id="exportPdfViewCreases" /> <span data-i18n="view.creasesMode">Creases</span></label>
+          <label><input type="checkbox" id="exportPdfViewPlan" /> <span data-i18n="view.plan">Plan</span></label>
+          <label style="display: none;"><input type="checkbox" id="exportPdfViewBlueprint" /> <span data-i18n="view.blueprint">Blueprint</span></label>
+          <label style="display: none;"><input type="checkbox" id="exportPdfViewRivers" /> <span data-i18n="view.rivers">Rivers</span></label>
+          <label><input type="checkbox" id="exportPdfViewFoldedForm" /> <span data-i18n="view.foldedForm">Folded Form</span></label>
+        </div>
+        <!-- One page per saved query (see exportRfSavedQueriesToPdf() in
+             main.js): the target diagram + coordinates/rank/error on top,
+             then every fold-sequence diagram (same ones "View diagrams"
+             shows inline) laid out in a grid below, each with its own
+             caption. Hidden/disabled when there are no saved queries to
+             export — see openExportPdfDialog(). -->
+        <div id="exportPdfRfQueriesRow" class="export-pdf-options export-pdf-rf-row">
+          <label><input type="checkbox" id="exportPdfIncludeRfQueries" /> <span data-i18n="exportPdf.rfQueries">Reference Finder — Saved Queries</span></label>
+        </div>
+        <div class="prompt-buttons">
+          <button id="exportPdfCancelBtn" type="button" data-i18n="overlay.cancel">Cancel</button>
+          <button id="exportPdfConfirmBtn" type="button" class="primary" data-i18n="exportPdf.export">Export</button>
         </div>
       </div>
     </div>

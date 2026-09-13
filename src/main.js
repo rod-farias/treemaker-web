@@ -18,8 +18,11 @@ import { treeToTmd5, tmd5ToTree } from './model/io/Tmd5Format.js';
 import { t, getLanguage, setLanguage, initI18n } from './i18n/i18n.js';
 import { bindPersistedSelect, bindPersistedCheckbox } from './ui/persistedPrefs.js';
 import * as rfClient from './referenceFinderClient.js';
-import { showFoldDiagrams, resetFoldDiagrams, renderTargetSVG, renderResultSVG } from './rfDiagramView.js';
+import { showFoldDiagrams, resetFoldDiagrams, renderTargetSVG, renderResultSVG, renderDiagramSVG } from './rfDiagramView.js';
+import { buildDiagramGroups } from './model/referenceFinder/rfDiagram.js';
+import { describeStep } from './referenceFinderDescriptions.js';
 import { version as APP_VERSION } from '../package.json';
+import { jsPDF } from 'jspdf';
 
 // Reveals .app-shell/#minWidthAlert/#busyOverlay (see the html:not(.app-ready)
 // rule in index.html's inline critical CSS), replacing the "loading"
@@ -130,6 +133,21 @@ const editAddPickedStubBtn = document.getElementById('editAddPickedStubBtn');
 const editAddLargestStubNodesBtn = document.getElementById('editAddLargestStubNodesBtn');
 const editAddLargestStubPolyBtn = document.getElementById('editAddLargestStubPolyBtn');
 const saveTmd5Btn = document.getElementById('saveTmd5Btn');
+const exportPdfBtn = document.getElementById('exportPdfBtn');
+const exportPdfOverlay = document.getElementById('exportPdfOverlay');
+const exportPdfCancelBtn = document.getElementById('exportPdfCancelBtn');
+const exportPdfConfirmBtn = document.getElementById('exportPdfConfirmBtn');
+const exportPdfViewCheckboxes = {
+  tree: document.getElementById('exportPdfViewTree'),
+  design: document.getElementById('exportPdfViewDesign'),
+  creases: document.getElementById('exportPdfViewCreases'),
+  plan: document.getElementById('exportPdfViewPlan'),
+  blueprint: document.getElementById('exportPdfViewBlueprint'),
+  rivers: document.getElementById('exportPdfViewRivers'),
+  foldedForm: document.getElementById('exportPdfViewFoldedForm')
+};
+const exportPdfRfQueriesRow = document.getElementById('exportPdfRfQueriesRow');
+const exportPdfIncludeRfQueriesCheckbox = document.getElementById('exportPdfIncludeRfQueries');
 const loadTmd5Btn = document.getElementById('loadTmd5Btn');
 const loadTmd5Input = document.getElementById('loadTmd5Input');
 const loadedFileNameInput = document.getElementById('loadedFileNameInput');
@@ -429,6 +447,7 @@ function openSplitEdgeDialog(edge) {
 
 const scaleLabel = document.getElementById('scaleLabel');
 const hoverInfoLabel = document.getElementById('hoverInfoLabel');
+const multiSelectToggleBtn = document.getElementById('multiSelectToggleBtn');
 // Scale's own cell in the canvas status bar is always visible (unlike the
 // pointed-object one next to it). Initialized to tree.getScale() at
 // startup and after Reset/Revert (a fresh tree's own scale, not just a
@@ -461,6 +480,7 @@ const selFixToPositionCheckbox = document.getElementById('selFixToPosition');
 const selFixToPositionLabel = document.getElementById('selFixToPositionLabel');
 const selPairEditor = document.getElementById('selPairEditor');
 const selPairToggle = document.getElementById('selPairToggle');
+const selPairSyncToggle = document.getElementById('selPairSyncToggle');
 const selCollinearEditor = document.getElementById('selCollinearEditor');
 const selCollinearToggle = document.getElementById('selCollinearToggle');
 const selNoStrainEditor = document.getElementById('selNoStrainEditor');
@@ -1686,6 +1706,9 @@ function renderNodePanel(nodeInfo) {
     condition instanceof ConditionNodeCombo && condition.getNode() === editor.selectedNode
   ));
   nodeFixToSymmetryLineCheckbox.checked = comboCondition?.getToSymmetryLine() || false;
+  // Kept visible (unlike "Not a leaf" swap above) so the option's existence
+  // stays discoverable — just non-interactive until a symmetry line exists.
+  nodeFixToSymmetryLineCheckbox.disabled = !tree.hasSymmetryLine();
   nodeFixToPaperEdgeCheckbox.checked = comboCondition?.getToPaperEdge() || false;
   nodeFixToPaperCornerCheckbox.checked = comboCondition?.getToPaperCorner() || false;
 
@@ -1889,6 +1912,7 @@ function renderGroupPanel() {
       condition instanceof ConditionNodeCombo && condition.getNode() === node
     )));
     selFixToSymmetryLineCheckbox.checked = comboConditions.every(condition => condition?.getToSymmetryLine());
+    selFixToSymmetryLineCheckbox.disabled = !tree.hasSymmetryLine();
     selFixToPaperEdgeCheckbox.checked = comboConditions.every(condition => condition?.getToPaperEdge());
     selFixToPaperCornerCheckbox.checked = comboConditions.every(condition => condition?.getToPaperCorner());
   }
@@ -1902,7 +1926,21 @@ function renderGroupPanel() {
   // collinearity (3) — not "2 or more"/"3 or more" like the Fix Node
   // block above.
   selPairEditor.style.display = (isLeafOnlySelection && leafNodes.length === 2) ? 'grid' : 'none';
-  if (isLeafOnlySelection && leafNodes.length === 2) selPairToggle.checked = !!findPairCondition(leafNodes);
+  if (isLeafOnlySelection && leafNodes.length === 2) {
+    const pairCondition = findPairCondition(leafNodes);
+    selPairToggle.checked = !!pairCondition;
+    // Pairing about a symmetry line makes no sense without one — keep the
+    // toggle visible (so the feature stays discoverable) but non-interactive.
+    selPairToggle.disabled = !tree.hasSymmetryLine();
+    // Only meaningful once the pair itself exists — unchecked/disabled the
+    // instant "2 Nodes Paired..." isn't checked, same rule whether that's
+    // because the user turned it off or because it just came disabled above.
+    // syncEditing itself lives on the condition (see ConditionNodesPaired),
+    // not on this checkbox, so it survives switching the selection away and
+    // back, and undo/redo.
+    selPairSyncToggle.disabled = !selPairToggle.checked;
+    selPairSyncToggle.checked = selPairToggle.checked && !!pairCondition.getSyncEditing();
+  }
   selCollinearEditor.style.display = (isLeafOnlySelection && leafNodes.length === 3) ? 'grid' : 'none';
   if (isLeafOnlySelection && leafNodes.length === 3) selCollinearToggle.checked = !!findCollinearCondition(leafNodes);
 
@@ -2512,6 +2550,7 @@ editSetLengthBtn.addEventListener('click', () => {
         return;
       }
       editor.setSelectedEdgeLengths(value);
+      for (const edge of editor.selectedEdges) syncPairedEdgeFrom(edge);
       commitAndRender();
     }
   });
@@ -2535,6 +2574,7 @@ editScaleLengthBtn.addEventListener('click', () => {
         return;
       }
       editor.scaleSelectedEdgeLengths(value);
+      for (const edge of editor.selectedEdges) syncPairedEdgeFrom(edge);
       commitAndRender();
     }
   });
@@ -2557,6 +2597,7 @@ edgeScaleLengthBtn.addEventListener('click', () => {
         return;
       }
       editor.scaleSelectedEdgeLengths(value);
+      for (const edge of editor.selectedEdges) syncPairedEdgeFrom(edge);
       commitAndRender();
     }
   });
@@ -2564,18 +2605,31 @@ edgeScaleLengthBtn.addEventListener('click', () => {
 
 // Equivalent to tmwxDoc::OnRenormalizeToEdge()/OnRenormalizeToUnitScale().
 editRenormalizeSelectionBtn.addEventListener('click', () => {
+  const edge = editor.selectedEdges[0];
   editor.renormalizeToSelectedEdge();
+  syncPairedEdgeFrom(edge);
   commitAndRender();
 });
 
 // Same action as the Edit panel's "Renormalize to Selection" above.
 edgeRenormalizeSelectionBtn.addEventListener('click', () => {
+  const edge = editor.selectedEdges[0];
   editor.renormalizeToSelectedEdge();
+  syncPairedEdgeFrom(edge);
   commitAndRender();
 });
 
 editRenormalizeUnitScaleBtn.addEventListener('click', () => {
   editor.renormalizeToUnitScale();
+  // Tree-wide rescale, no single "just edited" edge to anchor on — instead
+  // re-assert every sync-enabled pair's invariant from its lower/base node,
+  // same fallback rule applyPairedNodeSync() uses when the toggle is first
+  // switched on.
+  for (const condition of tree.getConditions()) {
+    if (!(condition instanceof ConditionNodesPaired) || !condition.getSyncEditing()) continue;
+    const baseNode = getLowerPairedNode(condition);
+    copyPairedEdgeProperties(baseNode, getPairPartner(condition, baseNode));
+  }
   commitAndRender();
 });
 
@@ -3150,6 +3204,207 @@ selPairToggle.addEventListener('change', () => {
   commitAndRender();
 });
 
+// "Synchronize Paired Node Editing" (selPairSyncToggle) support. The flag
+// itself lives on the ConditionNodesPaired condition (getSyncEditing(), see
+// that file) rather than on the checkbox, so it survives switching the
+// selection away and back, and undo/redo (tmTree.toJSON()/fromJSON()
+// persist it too). Once on, every one of these keeps the pair mirrored:
+//  - flipping the toggle itself (nothing was "just edited" yet, so the
+//    lower node/its edge — see getLowerPairedNode() — is treated as the
+//    base and copied onto the other side);
+//  - moving either paired node (Position X/Y fields or finishing a mouse
+//    drag) — the just-edited node is always the source, mirrored onto its
+//    partner via the tree's symmetry line;
+//  - editing either paired node's own adjacent edge's length/strain/
+//    stiffness (Edge inspector fields, or the four length-editing buttons)
+//    — the just-edited edge's values are copied onto the sibling edge.
+
+// Whichever of the two nodes sits lower on the paper (this tree's internal
+// Y grows downward — see flipDisplayY's comment — so "lower" is simply the
+// larger `location.y`) is the base when nothing more specific ("the user
+// just edited this one") is available yet.
+function getLowerPairedNode(condition) {
+  const n1 = condition.getNode1();
+  const n2 = condition.getNode2();
+  return n1.location.y >= n2.location.y ? n1 : n2;
+}
+
+function getPairPartner(condition, node) {
+  return condition.getNode1() === node ? condition.getNode2() : condition.getNode1();
+}
+
+// The sync-enabled ConditionNodesPaired condition this leaf node belongs
+// to, if any — both nodes of a pair are always leaves (degree 1), so a
+// branch/root node never matches.
+function findSyncEnabledPairCondition(node) {
+  if (!node || node.getDegree() !== 1) return null;
+  return tree.getConditions().find(condition => (
+    condition instanceof ConditionNodesPaired && condition.getSyncEditing() &&
+    (condition.getNode1() === node || condition.getNode2() === node)
+  )) || null;
+}
+
+// Copies base's own adjacent edge (length/strain/stiffness) onto other's.
+function copyPairedEdgeProperties(baseNode, otherNode) {
+  const baseEdge = baseNode.getEdges()[0];
+  const otherEdge = otherNode.getEdges()[0];
+  if (baseEdge && otherEdge && baseEdge !== otherEdge) {
+    otherEdge.setLength(baseEdge.getLength());
+    otherEdge.setStrain(baseEdge.getStrain());
+    otherEdge.setStiffness(baseEdge.getStiffness());
+  }
+}
+
+// Places other at base's mirror image across the tree's symmetry line.
+function mirrorPairedNodePosition(baseNode, otherNode) {
+  const mirrored = tree.mirrorPointAcrossSymmetryLine(baseNode.location.x, baseNode.location.y);
+  otherNode.setLocationXY(mirrored.x, mirrored.y);
+}
+
+// Run once, right when the toggle is switched on.
+function applyPairedNodeSync(condition) {
+  const baseNode = getLowerPairedNode(condition);
+  const otherNode = getPairPartner(condition, baseNode);
+  copyPairedEdgeProperties(baseNode, otherNode);
+  mirrorPairedNodePosition(baseNode, otherNode);
+  tree.refreshPathStates();
+}
+
+// Run after a node's position was just directly edited — mirrors that edit
+// onto its partner, if it's part of a sync-enabled pair.
+function syncPairedNodePositionFrom(node) {
+  const condition = findSyncEnabledPairCondition(node);
+  if (!condition) return;
+  mirrorPairedNodePosition(node, getPairPartner(condition, node));
+}
+
+// Run after an edge's length/strain/stiffness was just directly edited —
+// copies the change onto the sibling edge, if either endpoint is part of a
+// sync-enabled pair.
+function syncPairedEdgeFrom(edge) {
+  if (!edge) return;
+  for (const node of edge.nodes) {
+    const condition = findSyncEnabledPairCondition(node);
+    if (!condition) continue;
+    copyPairedEdgeProperties(node, getPairPartner(condition, node));
+  }
+}
+
+// --- Scale Selection, extended for a lone member of a sync-enabled pair ---
+//
+// tree.scaleSelection() (EdgeOptimizer) already folds every ConditionNodes
+// Paired into its joint solve as a hard equality (see the generic
+// tree.getConditions() loop in EdgeOptimizer.optimize()) — so if BOTH nodes
+// of a pair are in the selection, a plain scaleSelection() call already
+// finds a jointly-feasible symmetric layout on its own; nothing extra is
+// needed. The gap is when only ONE of the two is selected: the other sits
+// fixed, over-determining the sole free node's x/y against the pairing
+// constraint, which routinely fails to converge. For that case:
+//   1) maximize the selected node/edge alone, then mirror the result onto
+//      its partner (same as any other synced edit);
+//   2) if that leaves the tree infeasible (or didn't even converge), try
+//      the other way around — maximize the partner instead, mirror onto
+//      the originally selected node;
+//   3) if that still doesn't work, maximize both together — the pairing
+//      constraint then keeps the solve itself symmetric, no mirroring
+//      needed afterward.
+// Every attempt starts from a full geometry snapshot so a failed or
+// rejected one never leaks a partial mutation into the next (EdgeOptimizer
+// applies its last, possibly non-converged, state unconditionally — see
+// AugmentedLagrangianNLP.js's unconditional setX(x) before returning).
+
+function snapshotTreeGeometry() {
+  return {
+    nodes: tree.getNodes().map(node => ({ node, x: node.location.x, y: node.location.y })),
+    edges: tree.getEdges().map(edge => ({ edge, strain: edge.getStrain() }))
+  };
+}
+function restoreTreeGeometry(snapshot) {
+  for (const { node, x, y } of snapshot.nodes) { node.location.x = x; node.location.y = y; }
+  for (const { edge, strain } of snapshot.edges) edge.setStrain(strain);
+}
+
+// Same both-directions auto-add tree.scaleSelection() itself does (a
+// selected leaf implies its incident edge, a selected edge implies
+// whichever of its two endpoints is a leaf) — needed here too so a pairing
+// partner reachable only through an edge selection (no node explicitly
+// selected) is still detected below.
+function effectiveScaleSelectionNodes(nodes, edges) {
+  const result = new Set(nodes);
+  for (const edge of edges) {
+    for (const node of edge.nodes) {
+      if (node && node.getDegree() === 1) result.add(node);
+    }
+  }
+  return [...result];
+}
+
+// Whichever leaf in `nodes` belongs to a sync-enabled pair whose partner is
+// NOT also in `nodes` (the scenario above that actually needs this).
+function findLoneSyncedPairMember(nodes) {
+  for (const node of nodes) {
+    const condition = findSyncEnabledPairCondition(node);
+    if (!condition) continue;
+    const partner = getPairPartner(condition, node);
+    if (!nodes.includes(partner)) return { node, partner };
+  }
+  return null;
+}
+
+function withAdded(list, item) {
+  return !item || list.includes(item) ? list : [...list, item];
+}
+function withRemoved(list, item) {
+  return list.filter(existing => existing !== item);
+}
+
+function scaleSelectionWithPairSync(selectedNodes, selectedEdges) {
+  const lone = findLoneSyncedPairMember(effectiveScaleSelectionNodes(selectedNodes, selectedEdges));
+  if (!lone) return tree.scaleSelection(selectedNodes, selectedEdges);
+  const { node: a, partner: b } = lone;
+  const edgeA = a.getEdges()[0];
+  const edgeB = b.getEdges()[0];
+  const baseline = snapshotTreeGeometry();
+
+  // Attempt 1: maximize the originally selected node/edge, mirror onto its partner.
+  let result = tree.scaleSelection(selectedNodes, selectedEdges);
+  if (result.converged) {
+    mirrorPairedNodePosition(a, b);
+    copyPairedEdgeProperties(a, b);
+    if (tree.recalculateFeasibility().feasible) return { ...result, pairSyncAttempt: 'selected-node' };
+  }
+  restoreTreeGeometry(baseline);
+
+  // Attempt 2: same, the other way around.
+  const nodesForB = withAdded(withRemoved(selectedNodes, a), b);
+  const edgesForB = withAdded(withRemoved(selectedEdges, edgeA), edgeB);
+  result = tree.scaleSelection(nodesForB, edgesForB);
+  if (result.converged) {
+    mirrorPairedNodePosition(b, a);
+    copyPairedEdgeProperties(b, a);
+    if (tree.recalculateFeasibility().feasible) return { ...result, pairSyncAttempt: 'paired-node' };
+  }
+  restoreTreeGeometry(baseline);
+
+  // Attempt 3: maximize both together.
+  result = tree.scaleSelection(withAdded(selectedNodes, b), selectedEdges);
+  if (result.converged && tree.recalculateFeasibility().feasible) {
+    return { ...result, pairSyncAttempt: 'both' };
+  }
+  restoreTreeGeometry(baseline);
+  return { ...result, converged: false, reason: result.reason || 'pair-infeasible' };
+}
+
+selPairSyncToggle.addEventListener('change', () => {
+  const leafNodes = getSelectionLeafNodes();
+  if (leafNodes.length !== 2) return;
+  const condition = findPairCondition(leafNodes);
+  if (!condition) return;
+  condition.setSyncEditing(selPairSyncToggle.checked);
+  if (selPairSyncToggle.checked) applyPairedNodeSync(condition);
+  commitAndRender();
+});
+
 function findCollinearCondition(leafNodes) {
   const ids = new Set(leafNodes.map(node => node.id));
   return tree.getConditions().find(condition => (
@@ -3523,7 +3778,7 @@ unpinAllBtn.addEventListener('click', () => {
 
 scaleSelectionBtn.addEventListener('click', () => {
   try {
-    const result = tree.scaleSelection(editor.selectedNodes, editor.selectedEdges);
+    const result = scaleSelectionWithPairSync(editor.selectedNodes, editor.selectedEdges);
     renderSolverStatus(enrichWithDiagnosis(result));
     console.log('Scale Selection:', result);
   } catch (error) {
@@ -3784,6 +4039,391 @@ loadTmd5Input.addEventListener('change', async () => {
     showMessageDialog({ title: t('dialog.errorTitle'), message: t('error.loadFile', { msg: error.message }), severity: 'error' });
   } finally {
     loadTmd5Input.value = '';
+  }
+});
+
+// Export PDF (File section): one page per checked view, each captured from
+// the same #patternCanvas the app already draws Tree/Design/Creases/Plan/
+// Blueprint/Rivers on (see VIEW_PRESETS above) — Folded Form is the one
+// exception, its own separate <svg> (foldedFormSvg/FoldedFormRenderer)
+// rasterized onto an offscreen canvas the same way, so every page still
+// ends up a plain PNG addImage() into jsPDF. Order fixed here rather than
+// by checkbox DOM order, so the page order stays predictable regardless of
+// how the modal's markup is ever reordered.
+const EXPORT_PDF_VIEW_ORDER = ['tree', 'design', 'creases', 'plan', 'blueprint', 'rivers', 'foldedForm'];
+
+// Longest edge of every exported page, in PDF points (72pt/in) — 792pt is
+// US Letter's own long edge. Each view's own pixel aspect ratio is kept
+// exactly; only this shared long edge is fixed, so a wide view lands on a
+// landscape page and a tall one on a portrait page instead of forcing every
+// page into one fixed orientation.
+const EXPORT_PDF_PAGE_LONG_EDGE_PT = 792;
+
+function exportPdfPageSize(pixelWidth, pixelHeight) {
+  const scale = EXPORT_PDF_PAGE_LONG_EDGE_PT / Math.max(pixelWidth, pixelHeight);
+  return { width: pixelWidth * scale, height: pixelHeight * scale };
+}
+
+// Which of the three central-panel layers (see setWorkspaceLayer()) is
+// currently showing — exportSelectedViewsAsPdf() switches to 'treemaker' to
+// capture canvas views regardless of what the user had open (Folded Form,
+// or even the Reference Finder layer) and needs this to switch back
+// afterward instead of leaving the workspace stuck on 'treemaker'.
+function getCurrentWorkspaceLayer() {
+  if (referenceFinderLayer.style.display !== 'none') return 'referenceFinder';
+  if (foldedFormLayer.style.display !== 'none') return 'foldedForm';
+  return 'treemaker';
+}
+
+// Inverse of setViewPreset()'s own active-class toggle: reads which
+// .view-preset button (View section) is currently marked active and
+// recovers the view name from its id ("viewFoldedForm" -> "foldedForm").
+// Falls back to Design, same as setViewPreset()'s own fallback in render()
+// when nothing else is reachable.
+function getActiveViewName() {
+  const activeButton = document.querySelector('.view-preset.active');
+  if (!activeButton || !activeButton.id.startsWith('view')) return 'design';
+  const rest = activeButton.id.slice(4);
+  return rest.charAt(0).toLowerCase() + rest.slice(1);
+}
+
+// Rasterizes one self-contained SVG string (width/height/xmlns already on
+// its root, as FoldedFormRenderer._buildSvg() produces) onto an offscreen
+// canvas and returns a PNG data URL — the same "no second vector-PDF
+// library" approach the rest of the exported pages use, see PENDIENTE.md.
+function rasterizeSvgToPng(svgMarkup, width, height) {
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = width;
+      offscreen.height = height;
+      const ctx = offscreen.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(offscreen.toDataURL('image/png'));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('SVG rasterization failed'));
+    };
+    img.src = url;
+  });
+}
+
+// Root <svg width="…" height="…"> of every renderTargetSVG()/renderDiagramSVG()
+// string here is always its FIRST width/height attribute — none of their
+// child shapes (rect/line/circle/path/polygon/text) ever set either one —
+// so a plain first-match regex is enough to recover the pixel size to
+// rasterize at, without re-parsing the whole markup as XML.
+function parseSvgPixelSize(svgMarkup) {
+  const width = Number(svgMarkup.match(/\swidth="([\d.]+)"/)?.[1]);
+  const height = Number(svgMarkup.match(/\sheight="([\d.]+)"/)?.[1]);
+  return { width, height };
+}
+
+// Recomputes one saved query's fold sequence for the PDF export — steps
+// aren't part of what tree.rfSavedQueries persists (only the raw search
+// coordinates + which ranked result was picked, see rfManualSaveBtn's own
+// listener), so getting them back means re-running the exact same search,
+// same as clicking the saved-query row in the sidebar does (see
+// renderRfSavedQueries()'s row click handler, which this mirrors headlessly
+// — no UI fields touched). Returns null if the paper size changed enough
+// since saving that the search no longer comes back with any result at all.
+async function getSavedQuerySteps(query) {
+  await ensureRfBuilt();
+  const p1 = { x: query.x1, y: query.y1 };
+  const results = query.mode === 'line'
+    ? await rfClient.findLines(p1, { x: query.x2, y: query.y2 }, RF_SEARCH_NUM)
+    : await rfClient.findMarks(p1, RF_SEARCH_NUM);
+  if (results.length === 0) return null;
+  const index = (query.resultIndex >= 0 && query.resultIndex < results.length) ? query.resultIndex : 0;
+  return rfClient.sequence(results[index].id);
+}
+
+// US Letter, portrait, in pt — independent of the view pages' own per-view
+// custom page size, since a saved query's content (target + a grid of
+// fold-diagram thumbnails) is laid out rather than being one full-bleed
+// image; jsPDF allows mixed page sizes in the same document.
+const RF_QUERY_PAGE_WIDTH = 612;
+const RF_QUERY_PAGE_HEIGHT = 792;
+const RF_QUERY_PAGE_MARGIN = 40;
+
+// One page: target diagram + coordinates/rank/error in a header row (same
+// numbers renderRfSavedQueries() lists in the sidebar), then every
+// fold-sequence diagram for the saved result — same ones "View diagrams"
+// shows inline (see rfDiagramView.js's buildDiagramCards(), which this
+// mirrors caption-for-caption) — laid out in a grid sized to fill
+// whatever's left of the page.
+async function drawRfQueryPage(pdf, query, steps, queryIndex) {
+  const paperWidth = tree.getPaperWidth();
+  const paperHeight = tree.getPaperHeight();
+  pdf.addPage([RF_QUERY_PAGE_WIDTH, RF_QUERY_PAGE_HEIGHT], 'portrait');
+
+  const targetSvg = renderTargetSVG(query.mode, { x: query.x1, y: query.y1 }, { x: query.x2, y: query.y2 }, paperWidth, paperHeight, 160);
+  const targetSize = parseSvgPixelSize(targetSvg);
+  const targetPng = await rasterizeSvgToPng(targetSvg, targetSize.width, targetSize.height);
+  const targetDrawWidth = 110;
+  const targetDrawHeight = targetDrawWidth * (targetSize.height / targetSize.width);
+  const targetX = RF_QUERY_PAGE_MARGIN;
+  const targetY = RF_QUERY_PAGE_MARGIN;
+  pdf.addImage(targetPng, 'PNG', targetX, targetY, targetDrawWidth, targetDrawHeight, undefined, 'FAST');
+
+  const textX = targetX + targetDrawWidth + 18;
+  let textY = targetY + 12;
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(13);
+  pdf.text(t('exportPdf.rfQueryHeading', { n: queryIndex + 1 }), textX, textY);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(10.5);
+  textY += 22;
+  // jsPDF's standard 'helvetica' font only supports WinAnsi, not the "→"
+  // (U+2192) in rf.savedQueryLine's translation — left in, it comes out as
+  // mangled glyphs (and throws off this line's spacing vs. the plain-ASCII
+  // Rank/Error lines below it). Swapped for an ASCII arrow here only; the
+  // sidebar rendering of the same string (renderRfSavedQueries) keeps the
+  // real arrow since HTML has no such font restriction.
+  const coordText = (query.mode === 'line'
+    ? t('rf.savedQueryLine', { x1: query.x1.toFixed(3), y1: query.y1.toFixed(3), x2: query.x2.toFixed(3), y2: query.y2.toFixed(3) })
+    : t('rf.savedQueryPoint', { x1: query.x1.toFixed(3), y1: query.y1.toFixed(3) })
+  ).replace('→', '->');
+  pdf.text(coordText, textX, textY); textY += 16;
+  pdf.text(t('rf.rankLine', { rank: query.rank }), textX, textY); textY += 16;
+  pdf.text(t('rf.errorLine', { error: query.error.toFixed(4) }), textX, textY); textY += 16;
+
+  let cursorY = targetY + Math.max(targetDrawHeight, textY - targetY) + 20;
+  pdf.setDrawColor(200);
+  pdf.line(RF_QUERY_PAGE_MARGIN, cursorY, RF_QUERY_PAGE_WIDTH - RF_QUERY_PAGE_MARGIN, cursorY);
+  cursorY += 18;
+
+  const groups = buildDiagramGroups(steps);
+  if (groups.length === 0) {
+    pdf.setFontSize(10);
+    pdf.text(t('exportPdf.rfQueryNoSteps'), RF_QUERY_PAGE_MARGIN, cursorY);
+    return;
+  }
+
+  const availableWidth = RF_QUERY_PAGE_WIDTH - RF_QUERY_PAGE_MARGIN * 2;
+  const availableHeight = RF_QUERY_PAGE_HEIGHT - RF_QUERY_PAGE_MARGIN - cursorY;
+  const paperAspect = paperWidth / paperHeight;
+  const captionHeight = 34; // room for a wrapped 2-3 line caption below each thumbnail
+
+  // Fixed at 4 columns regardless of how many diagrams there are (even
+  // fewer than 4, leaving empty cells): leaving the column count to
+  // maximize per-cell size (the old approach) blew up each thumbnail well
+  // past renderDiagramSVG()'s fixed 160px source resolution whenever a
+  // query had few groups, producing a visibly upscaled/pixelated result.
+  // Fixing it at 4 keeps thumbnail size consistent across queries no matter
+  // how many groups each one has.
+  const cols = 4;
+  const rows = Math.ceil(groups.length / cols);
+  const cellWidth = availableWidth / cols;
+  // Rows are packed to their own natural height (image + caption + a small
+  // gap) instead of stretching to fill whatever's left of the page — with
+  // 4 fixed columns a query with few groups has few rows, and dividing the
+  // full remaining page height by that row count left huge gaps between
+  // them. maxCellHeight still caps it so a query with many groups doesn't
+  // overflow the page.
+  const rowGap = 14;
+  const maxImageWidth = cellWidth - 8;
+  const naturalImageHeight = maxImageWidth / paperAspect;
+  const maxCellHeight = availableHeight / rows;
+  const cellHeight = Math.min(maxCellHeight, naturalImageHeight + captionHeight + rowGap);
+  const drawImageHeight = Math.max(16, Math.min(naturalImageHeight, cellHeight - captionHeight - rowGap));
+  const imageWidth = drawImageHeight * paperAspect;
+
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const group = groups[groupIndex];
+    const col = groupIndex % cols;
+    const row = Math.floor(groupIndex / cols);
+    const cellX = RF_QUERY_PAGE_MARGIN + col * cellWidth;
+    const cellY = cursorY + row * cellHeight;
+    const imageX = cellX + (cellWidth - imageWidth) / 2;
+
+    const diagramSvg = renderDiagramSVG(steps, group, paperWidth, paperHeight, 160);
+    const diagramSize = parseSvgPixelSize(diagramSvg);
+    const diagramPng = await rasterizeSvgToPng(diagramSvg, diagramSize.width, diagramSize.height);
+    pdf.addImage(diagramPng, 'PNG', imageX, cellY, imageWidth, drawImageHeight, undefined, 'FAST');
+
+    // Same per-group captioning as buildDiagramCards() in rfDiagramView.js:
+    // one describeStep() line per step the group covers, joined with spaces.
+    const captionParts = [];
+    for (let stepIndex = group.idef; stepIndex <= group.iact; stepIndex += 1) {
+      const line = describeStep(steps[stepIndex], steps);
+      if (line) captionParts.push(line);
+    }
+    const caption = captionParts.join(' ') || String(groupIndex + 1);
+    pdf.setFontSize(7.5);
+    const wrapped = pdf.splitTextToSize(caption, cellWidth - 6);
+    pdf.text(wrapped, cellX + cellWidth / 2, cellY + drawImageHeight + 10, { align: 'center' });
+  }
+}
+
+function openExportPdfDialog() {
+  const hasCreasePattern = tree.getCreases().length > 0;
+  for (const name of ['creases', 'plan', 'blueprint', 'rivers', 'foldedForm']) {
+    const checkbox = exportPdfViewCheckboxes[name];
+    checkbox.disabled = !hasCreasePattern;
+    if (!hasCreasePattern) checkbox.checked = false;
+  }
+  const hasSavedQueries = tree.rfSavedQueries.length > 0;
+  exportPdfRfQueriesRow.style.display = hasSavedQueries ? '' : 'none';
+  exportPdfIncludeRfQueriesCheckbox.disabled = !hasSavedQueries;
+  if (!hasSavedQueries) exportPdfIncludeRfQueriesCheckbox.checked = false;
+  exportPdfOverlay.style.display = 'flex';
+}
+
+function closeExportPdfDialog() {
+  exportPdfOverlay.style.display = 'none';
+}
+
+exportPdfBtn.addEventListener('click', openExportPdfDialog);
+exportPdfCancelBtn.addEventListener('click', closeExportPdfDialog);
+
+// Captures every selected view as one PNG per page and assembles them into
+// a single PDF with jsPDF. Canvas views (everything but Folded Form) are
+// captured by silently switching VIEW_PRESETS/zoom, drawing straight via
+// renderer.render() (not the full render()/commitAndRender() wrappers —
+// this must never push undo history or touch other UI state), then
+// restoring exactly what was active before the export started, in a
+// `finally` so a mid-export error still leaves the workspace as the user
+// left it.
+async function exportSelectedViewsAsPdf(selectedViews, includeRfQueries) {
+  const originalLayer = getCurrentWorkspaceLayer();
+  const originalViewName = getActiveViewName();
+  const originalZoom = renderer.zoom;
+  const originalPanX = renderer.panX;
+  const originalPanY = renderer.panY;
+  const originalSelectedObjects = renderer.selectedObjects;
+
+  const pages = [];
+  try {
+    setWorkspaceLayer('treemaker');
+    renderer.selectedObjects = [];
+    for (const name of selectedViews) {
+      if (name === 'foldedForm') continue;
+      setViewPreset(name);
+      renderer.fitViewport();
+      renderer.render();
+      pages.push({ dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height });
+    }
+    if (selectedViews.includes('foldedForm')) {
+      foldedFormRenderer.setTree(tree);
+      foldedFormRenderer.setSelection([]);
+      foldedFormRenderer.render();
+      const svgEl = foldedFormSvg.querySelector('svg');
+      const width = Number(svgEl.getAttribute('width'));
+      const height = Number(svgEl.getAttribute('height'));
+      const dataUrl = await rasterizeSvgToPng(foldedFormSvg.innerHTML, width, height);
+      pages.push({ dataUrl, width, height });
+    }
+  } finally {
+    setViewPreset(originalViewName);
+    renderer.zoom = originalZoom;
+    renderer.panX = originalPanX;
+    renderer.panY = originalPanY;
+    renderer.selectedObjects = originalSelectedObjects;
+    renderer.render();
+    setWorkspaceLayer(originalLayer);
+  }
+
+  // Independent of the canvas/view state juggled above — recomputing a
+  // saved query's fold sequence is a plain rfClient round-trip, nothing to
+  // switch and restore. A query whose search no longer returns any result
+  // (e.g. the paper size changed since it was saved) is silently skipped —
+  // counted here so the caller can warn once, after the export, the same
+  // way saveTmd5Btn warns about skipped conditions rather than failing the
+  // whole export over it.
+  const rfQueryPages = [];
+  let skippedQueryCount = 0;
+  if (includeRfQueries) {
+    document.body.style.cursor = 'wait';
+    try {
+      for (const query of tree.rfSavedQueries) {
+        const steps = await getSavedQuerySteps(query);
+        if (steps) {
+          rfQueryPages.push({ query, steps });
+        } else {
+          skippedQueryCount += 1;
+        }
+      }
+    } finally {
+      document.body.style.cursor = '';
+    }
+  }
+
+  // Started as a default a4 page and dropped at the end (deletePage()
+  // rejects going below one page, so every real page is added first and
+  // the placeholder is only removed once it's no longer the last one).
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+  for (const page of pages) {
+    const size = exportPdfPageSize(page.width, page.height);
+    const orientation = size.width >= size.height ? 'landscape' : 'portrait';
+    pdf.addPage([size.width, size.height], orientation);
+    // jsPDF's own default (no `compression` argument) embeds the image as
+    // fully raw, uncompressed pixel data — a 940x900 page alone came out
+    // to 2.5MB that way. 'FAST' flate-compresses the stream (lossless,
+    // unlike a JPEG re-encode, which would blur the thin crease/edge
+    // lines) and cut a real 4-page export from ~9.5MB down to a few
+    // hundred KB in testing.
+    pdf.addImage(page.dataUrl, 'PNG', 0, 0, size.width, size.height, undefined, 'FAST');
+  }
+  for (let i = 0; i < rfQueryPages.length; i += 1) {
+    await drawRfQueryPage(pdf, rfQueryPages[i].query, rfQueryPages[i].steps, i);
+  }
+  pdf.deletePage(1);
+
+  const blob = pdf.output('blob');
+  const suggestedName = (loadedTmd5FileName ?? 'treemaker-tree').replace(/\.tmd5$/i, '') + '.pdf';
+
+  if ('showSaveFilePicker' in window) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: 'PDF file', accept: { 'application/pdf': ['.pdf'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } catch (error) {
+      if (error.name === 'AbortError') return null; // user cancelled the dialog
+      throw error;
+    }
+    return { skippedQueryCount };
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = suggestedName;
+  link.click();
+  URL.revokeObjectURL(url);
+  return { skippedQueryCount };
+}
+
+exportPdfConfirmBtn.addEventListener('click', async () => {
+  const selectedViews = EXPORT_PDF_VIEW_ORDER.filter(name => {
+    const checkbox = exportPdfViewCheckboxes[name];
+    return checkbox && !checkbox.disabled && checkbox.checked;
+  });
+  const includeRfQueries = !exportPdfIncludeRfQueriesCheckbox.disabled && exportPdfIncludeRfQueriesCheckbox.checked;
+  if (selectedViews.length === 0 && !includeRfQueries) {
+    showMessageDialog({ title: t('exportPdf.title'), message: t('exportPdf.noneSelected'), severity: 'warning' });
+    return;
+  }
+  closeExportPdfDialog();
+  try {
+    const result = await exportSelectedViewsAsPdf(selectedViews, includeRfQueries);
+    if (result && result.skippedQueryCount > 0) {
+      showMessageDialog({ title: t('exportPdf.title'), message: t('exportPdf.rfQueriesSkipped', { n: result.skippedQueryCount }), severity: 'warning' });
+    }
+  } catch (error) {
+    console.error('No se pudo exportar el PDF:', error);
+    showMessageDialog({ title: t('dialog.errorTitle'), message: t('error.exportPdf', { msg: error.message }), severity: 'error' });
   }
 });
 
@@ -4067,8 +4707,20 @@ aboutOverlay.addEventListener('keydown', (e) => {
 function showStartupAbout() {
   const warnings = [];
   if (showStartupWarningsCheckbox.checked) {
+    // window.innerWidth/innerHeight aren't reliable phone detectors here:
+    // the viewport meta tag (index.html) pins the layout viewport to
+    // .app-shell's own 1300px min-width on purpose (see AVANCE.md, "Uso en
+    // smartphones y tablets"), so on a phone these two always read close to
+    // 1300 x a proportionally tall value, never actually short — this pair
+    // of checks only ever fires from a desktop browser window resized
+    // narrow/short, where the viewport meta doesn't apply. screen.width/
+    // height (the physical device's own resolution in CSS px, untouched by
+    // this page's viewport meta) plus a touch check is what actually tells
+    // a small phone apart from a resized desktop window.
     if (window.innerWidth < 1300) warnings.push(t('app.minWidthWarning'));
     if (window.innerHeight < 550) warnings.push(t('app.minHeightWarning'));
+    const isLikelyPhone = navigator.maxTouchPoints > 0 && Math.min(window.screen.width, window.screen.height) < 500;
+    if (isLikelyPhone) warnings.push(t('app.phoneWarning'));
   }
   aboutWarningsList.replaceChildren();
   for (const message of warnings) {
@@ -4137,6 +4789,7 @@ nodeLabelInput.addEventListener('change', (e) => {
 // same effect as dragging it with the mouse, clamped to the paper bounds.
 function applyNodePosition() {
   editor.setSelectedNodePosition(nodeXInput.value, flipDisplayY(Number(nodeYInput.value)));
+  syncPairedNodePositionFrom(editor.selectedNode);
   commitAndRender();
 }
 nodeXInput.addEventListener('change', applyNodePosition);
@@ -4179,6 +4832,7 @@ function applyEdgeProperties() {
   editor.setSelectedEdgeLength(edgeLengthInput.value);
   editor.setSelectedEdgeStrain(edgeStrainInput.value);
   editor.setSelectedEdgeStiffness(edgeStiffnessInput.value);
+  syncPairedEdgeFrom(editor.selectedEdge);
   commitAndRender();
 }
 edgeLengthInput.addEventListener('change', applyEdgeProperties);
@@ -4209,7 +4863,11 @@ canvas.addEventListener('mousedown', (e) => {
     return;
   }
 
-  if (e.shiftKey) return;
+  // Same no-op as a real shift+click on empty space: while multiSelectMode
+  // is on (see multiSelectToggleBtn below), a tap on empty canvas shouldn't
+  // create a node or clear the selection either — it'd undo the whole
+  // point of the mode on the very next imprecise tap.
+  if (e.shiftKey || editor.multiSelectMode) return;
 
   const world = renderer.screenToWorld(screenX, screenY);
   const paperWidth = tree.getPaperWidth();
@@ -4257,6 +4915,20 @@ canvas.addEventListener('mousedown', (e) => {
   commitAndRender();
 });
 
+// Persistent mode toggle floating over the canvas (top-left, see
+// multiSelectToggleBtn in index.html/style.css) — the touch equivalent of
+// holding Shift while clicking, for tablets/phones where there's no Shift
+// key to hold. While on, every tap in NodeEditor._handleSelectMode() (and
+// the empty-canvas guard right above) behaves as if shiftKey were true:
+// see NodeEditor._isMultiSelectGesture(). Session-only state, same as
+// "Part Type"/other transient UI controls — not one of persistedPrefs.js's
+// saved settings, since it's closer to a momentary tool than a preference.
+multiSelectToggleBtn.addEventListener('click', () => {
+  editor.multiSelectMode = !editor.multiSelectMode;
+  multiSelectToggleBtn.classList.toggle('active', editor.multiSelectMode);
+  multiSelectToggleBtn.setAttribute('aria-pressed', String(editor.multiSelectMode));
+});
+
 // Keeps the persistent "pointed object" row (below the canvas — see
 // .canvas-status-bar) in sync with renderer.hoveredObject. Used both from
 // the mousemove handler below (after renderer.onMouseMove() has just
@@ -4293,7 +4965,15 @@ canvas.addEventListener('mouseleave', () => {
 });
 
 canvas.addEventListener('mouseup', (e) => {
+  // editor.onMouseUp() clears draggingNodes (via _resetDrag()) before we'd
+  // get a chance to look at it, so grab whatever was actually being dragged
+  // first — that's the "just edited by the user" signal
+  // syncPairedNodePositionFrom() needs to mirror a drag onto a paired node.
+  const draggedNodes = editor.draggingNodes;
   editor.onMouseUp(e);
+  if (draggedNodes) {
+    for (const node of draggedNodes) syncPairedNodePositionFrom(node);
+  }
   // This is where a node drag (if any) just ended, so it's the right place
   // to commit history: mousemove keeps isDirty=true on every frame while
   // dragging (see below), but never commits — otherwise dragging across

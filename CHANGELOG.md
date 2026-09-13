@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.0] - 2026-09-13
+
+### Added
+- **PDF export**: a new "Export PDF" action (next to Save `.tmd5`) opens a
+  dialog to pick which views (Tree, Design, Creases, Plan, Folded Form) go
+  into the PDF, one page per view, each sized to match that view's own
+  aspect ratio.
+- **PDF export of saved ReferenceFinder queries**: the same dialog can also
+  export your saved ReferenceFinder queries, one page per query, each with
+  the target diagram and the full fold sequence that solves it.
+- **Paired-node symmetric editing**: nodes linked by "Nodes Paired" can now
+  optionally have their position and adjacent-edge edits mirrored onto each
+  other automatically, for symmetric designs.
+- Several usability improvements for phones and tablets: correct initial
+  zoom/scroll on small phone screens, a resized "About" dialog on narrow
+  windows, a phone-specific startup notice, and a canvas "Multi-select"
+  toggle for touch-only multi-selection.
+
+### Fixed
+- A handful of polish fixes to the PDF export of saved ReferenceFinder
+  queries: correct rendering of non-ASCII characters, and more consistent
+  thumbnail sizing across queries with different numbers of steps.
+
 ## [1.0.0] - 2026-09-08
 
 First fully functional release. The feature set is the same one introduced in

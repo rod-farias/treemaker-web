@@ -27,6 +27,12 @@ export class ConditionNodesPaired extends tmCondition {
     super(tree);
     this.node1 = node1;
     this.node2 = node2;
+    // SPA-only editing convenience (not part of the original TreeMaker file
+    // format/CNpn tag): when on, editing either node's position, or either
+    // node's own adjacent edge's length/strain/stiffness, mirrors that
+    // change onto the other side of the pair — see "Synchronize Paired Node
+    // Editing" in main.js.
+    this.syncEditing = false;
 
     this.calcFeasibility();
   }
@@ -37,6 +43,8 @@ export class ConditionNodesPaired extends tmCondition {
 
   getNode1() { return this.node1; }
   getNode2() { return this.node2; }
+  getSyncEditing() { return this.syncEditing; }
+  setSyncEditing(value) { this.syncEditing = Boolean(value); }
 
   setNode1(node) {
     this.node1 = node;

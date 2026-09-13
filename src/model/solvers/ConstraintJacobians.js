@@ -1,3 +1,7 @@
+import { ConditionNodeCombo } from '../conditions/ConditionNodeCombo.js';
+import { ConditionNodeSymmetric } from '../conditions/ConditionNodeSymmetric.js';
+import { ConditionNodesPaired } from '../conditions/ConditionNodesPaired.js';
+
 function variableIndex(variables, node, axis) {
   return variables.findIndex(variable => variable.node === node && variable.axis === axis);
 }
@@ -17,7 +21,7 @@ export function constraintJacobians(condition, variables, tree) {
   // ConditionNodeCombo: rows in the same order as the matching branch in
   // ConstraintResiduals.js — see the comment there for why this dispatch
   // must come before the generic getXFixed/getCornerLocation branches.
-  if (condition.constructor.name === 'ConditionNodeCombo') {
+  if (condition instanceof ConditionNodeCombo) {
     const node = condition.getNode?.();
     if (!node) return null;
     const loc = node.getLoc();
@@ -98,7 +102,7 @@ export function constraintJacobians(condition, variables, tree) {
     return [row];
   }
 
-  if (condition.constructor.name === 'ConditionNodeSymmetric') {
+  if (condition instanceof ConditionNodeSymmetric) {
     const node = condition.getNode1?.();
     if (!node || !tree?.hasSymmetryLine?.()) return null;
     const direction = tree.getSymDir();
@@ -115,7 +119,7 @@ export function constraintJacobians(condition, variables, tree) {
 
     // ConditionNodesPaired: mirror images about the tree's symmetry line
     // (see the matching branch in ConstraintResiduals.js for the math).
-    if (condition.constructor.name === 'ConditionNodesPaired') {
+    if (condition instanceof ConditionNodesPaired) {
       if (!tree?.hasSymmetryLine?.()) return null;
       const direction = tree.getSymDir();
       const perpRow = emptyRow(size);

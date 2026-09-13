@@ -19,6 +19,7 @@ Includes:
 - Ability to save ReferenceFinder queries. They can even be saved inside the design's tmd5 file.
 - We added a list of the crease vertices scaled to the real size of the paper, in case you're one of those who work with a ruler and a calculator.
 - English and Spanish languages.
+- Export any view, and your saved ReferenceFinder queries, to PDF.
 
 ## Limitations
 
@@ -63,7 +64,7 @@ index.html              — main interface (view panel, solve panel,
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the version history, including what changed between the 0.1.0 beta and the current 1.0.0 release.
+See [`CHANGELOG.md`](CHANGELOG.md) for the version history, including what changed between the 0.1.0 beta and the current 1.1.0 release.
 
 ## License
 
