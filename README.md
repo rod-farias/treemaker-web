@@ -64,7 +64,7 @@ index.html              — main interface (view panel, solve panel,
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the version history, including what changed between the 0.1.0 beta and the current 1.1.0 release.
+See [`CHANGELOG.md`](CHANGELOG.md) for the version history, including what changed between the 0.1.0 beta and the current 1.1.1 release.
 
 ## License
 

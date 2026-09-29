@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.1] - 2026-09-29
+
+### Changed
+- The app name now reads "TreeMaker Web" everywhere, including the browser
+  tab title (previously "TreeMaker SPA").
+
 ## [1.1.0] - 2026-09-13
 
 ### Added

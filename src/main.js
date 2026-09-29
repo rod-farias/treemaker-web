@@ -5103,8 +5103,8 @@ renderScaleLabel();
 applyViewPreset('design');
 
 // Initial setup
-console.log('TreeMaker SPA initialized');
-console.log('TreeMaker SPA initialized');
+console.log('TreeMaker Web initialized');
+console.log('TreeMaker Web initialized');
 
 // Establishes lastFeasibilityReport before anything can read it — the
 // default tree is trivially feasible, but without this the chip/dialog
